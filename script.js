@@ -470,7 +470,7 @@ function renderAnalysisOutput(latestData, signals) {
 
 async function fetchStockInfo(ticker) {
     try {
-        const response = await fetch(`http://localhost:5000/api/stock/info?ticker=${ticker}`);
+        const response = await fetch(`/api/stock/info?ticker=${ticker}`);
         if (!response.ok) {
             throw new Error('Failed to fetch stock info');
         }
@@ -507,7 +507,7 @@ document.getElementById('analyze').addEventListener('click', async () => {
     // Fetch both chart data and stock info in parallel
     const period = document.getElementById('period-select').value;
     const interval = period === '1d' ? '5m' : '1d';
-    const chartApiUrl = `http://localhost:5000/api/stock?ticker=${ticker}&range=${period}&interval=${interval}`;
+    const chartApiUrl = `/api/stock?ticker=${ticker}&range=${period}&interval=${interval}`;
 
     const chartPromise = fetch(chartApiUrl).then(res => res.json());
     const infoPromise = fetchStockInfo(ticker);

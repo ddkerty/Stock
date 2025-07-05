@@ -1,4 +1,4 @@
-// script.js (Final Version - Including Neutral Signals)
+// script.js (Final Version - No Omissions)
 
 // --- 전역 변수: 차트 객체, 주식 목록, 현재 데이터 저장소 ---
 let chart, statsRadarChart;
@@ -23,6 +23,9 @@ const actualContent = document.getElementById('actual-content');
 const stockInfoCard = document.getElementById('stock-info-card');
 const stockInfoContainer = document.getElementById('stock-info-container');
 const fundamentalStatsCard = document.getElementById('fundamental-stats-card');
+const technicalAnalysisCard = document.getElementById('technical-analysis-card');
+const technicalAnalysisContainer = document.getElementById('technical-analysis-container');
+
 
 // --- 인기/최근 검색 데이터 ---
 const popularTickers = [
@@ -41,18 +44,67 @@ function showLoading(isLoading) {
     if(isLoading) {
         stockInfoCard.classList.add('d-none');
         fundamentalStatsCard.classList.add('d-none');
+        technicalAnalysisCard.classList.add('d-none');
     }
 }
 
 /** 기업의 기본 정보(이름, 개요 등)를 렌더링합니다. */
 function renderStockInfo(info) {
     stockInfoContainer.innerHTML = `
-        <h5>${info.longName || '이름 정보 없음'}</h5>
-        <p class="text-muted small">${info.sector || ''} / ${info.country || ''}</p>
-        <p class="mt-3 small">${info.longBusinessSummary || '기업 개요 정보가 없습니다.'}</p>
+        <h6 class="card-title">${info.longName || '이름 정보 없음'}</h6>
+        <p class="card-subtitle mb-2 text-muted small">${info.sector || ''} / ${info.country || ''}</p>
+        <p class="card-text small mt-3">${info.longBusinessSummary || '기업 개요 정보가 없습니다.'}</p>
     `;
     stockInfoCard.classList.remove('d-none');
 }
+
+/** 기술 지표 분석 카드(요약, 신호)를 렌더링합니다. */
+function renderTechnicalAnalysisCard(data) {
+    const last = (arr) => (arr && arr.length > 0 ? arr.filter(v => v !== null).pop() : null);
+    const latest = {
+        close: last(data.ohlc.close),
+        rsi: last(data.rsi),
+        macd_line: last(data.macd.line),
+        macd_signal: last(data.macd.signal),
+        bb_upper: last(data.bbands.upper),
+        bb_lower: last(data.bbands.lower),
+    };
+
+    let signals = [];
+    if (latest.rsi !== null) {
+        if (latest.rsi > 70) signals.push({ type: 'negative', text: `<strong>RSI (${latest.rsi.toFixed(1)}):</strong> 과매수 상태` });
+        else if (latest.rsi < 30) signals.push({ type: 'positive', text: `<strong>RSI (${latest.rsi.toFixed(1)}):</strong> 과매도 상태` });
+        else signals.push({ type: 'neutral', text: `<strong>RSI (${latest.rsi.toFixed(1)}):</strong> 중립 구간` });
+    }
+    if (latest.close !== null && latest.bb_upper !== null && latest.bb_lower !== null) {
+        if (latest.close > latest.bb_upper) signals.push({ type: 'negative', text: '<strong>볼린저 밴드:</strong> 상단 돌파 (과매수 가능성)' });
+        else if (latest.close < latest.bb_lower) signals.push({ type: 'positive', text: '<strong>볼린저 밴드:</strong> 하단 이탈 (과매도 가능성)' });
+        else signals.push({ type: 'neutral', text: '<strong>볼린저 밴드:</strong> 밴드 내 안정적 움직임' });
+    }
+    if (latest.macd_line !== null && latest.macd_signal !== null) {
+        if (latest.macd_line > latest.macd_signal) signals.push({ type: 'positive', text: '<strong>MACD:</strong> 골든 크로스 (상승 신호)' });
+        else signals.push({ type: 'negative', text: '<strong>MACD:</strong> 데드 크로스 (하락 신호)' });
+    }
+
+    let signalHtml = '<p class="text-center text-muted small">분석 신호 없음</p>';
+    if (signals.length > 0) {
+        signalHtml = signals.map(signal => {
+            let icon, colorClass;
+            switch(signal.type) {
+                case 'positive': icon = '▲'; colorClass = 'text-success'; break;
+                case 'negative': icon = '▼'; colorClass = 'text-danger'; break;
+                default: icon = '―'; colorClass = 'text-muted'; break;
+            }
+            return `<li class="list-group-item d-flex align-items-center ${colorClass} small py-2"><span class="fs-5 me-2 fw-bold">${icon}</span> ${signal.text}</li>`;
+        }).join('');
+    }
+    
+    technicalAnalysisContainer.innerHTML = `
+        <ul class="list-group list-group-flush">${signalHtml}</ul>
+    `;
+    technicalAnalysisCard.classList.remove('d-none');
+}
+
 
 /** 펀더멘탈 스탯 카드(등급, 점수, 레이더 차트)를 렌더링합니다. */
 function renderFundamentalStats(info) {
@@ -64,17 +116,12 @@ function renderFundamentalStats(info) {
     const { stats, rawStats } = info;
     
     document.getElementById('stats-grade').textContent = stats.grade;
-    document.getElementById('stats-total-score').textContent = stats.totalScore.toFixed(2);
-    document.getElementById('stats-value-score').textContent = stats.scores.value;
-    document.getElementById('stats-growth-score').textContent = stats.scores.growth;
-    document.getElementById('stats-profitability-score').textContent = stats.scores.profitability;
-    document.getElementById('stats-stability-score').textContent = stats.scores.stability;
-
-    document.getElementById('raw-data-list').innerHTML = `
-        <li class="list-group-item d-flex justify-content-between small"><strong>Trailing PE:</strong> <span>${rawStats.pe ? rawStats.pe.toFixed(2) : 'N/A'}</span></li>
-        <li class="list-group-item d-flex justify-content-between small"><strong>Earnings Growth:</strong> <span>${rawStats.earningsGrowth ? (rawStats.earningsGrowth * 100).toFixed(2) + '%' : 'N/A'}</span></li>
-        <li class="list-group-item d-flex justify-content-between small"><strong>ROE:</strong> <span>${rawStats.roe ? (rawStats.roe * 100).toFixed(2) + '%' : 'N/A'}</span></li>
-        <li class="list-group-item d-flex justify-content-between small"><strong>Debt to Equity:</strong> <span>${rawStats.debtToEquity ? rawStats.debtToEquity.toFixed(2) : 'N/A'}</span></li>
+    
+    const rawDataList = document.getElementById('raw-data-list');
+    rawDataList.innerHTML = `
+        <li class="list-group-item d-flex justify-content-between align-items-center small py-1"><strong>종합 점수:</strong> <span class="badge bg-secondary">${stats.totalScore.toFixed(2)}</span></li>
+        <li class="list-group-item d-flex justify-content-between align-items-center small py-1">Trailing PE: <span>${rawStats.pe ? rawStats.pe.toFixed(2) : 'N/A'}</span></li>
+        <li class="list-group-item d-flex justify-content-between align-items-center small py-1">ROE: <span>${rawStats.roe ? (rawStats.roe * 100).toFixed(2) + '%' : 'N/A'}</span></li>
     `;
     
     const ctx = document.getElementById('stats-radar-chart').getContext('2d');
@@ -93,82 +140,34 @@ function renderFundamentalStats(info) {
             }]
         },
         options: {
-            responsive: true, maintainAspectRatio: false,
-            scales: { r: { suggestedMin: 0, suggestedMax: 100, pointLabels: { font: { size: 12 } } } },
-            plugins: { legend: { display: false } }
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                r: {
+                    suggestedMin: 0,
+                    suggestedMax: 100,
+                    pointLabels: { font: { size: 12 } },
+                    ticks: { display: false }
+                }
+            },
+            plugins: {
+                legend: { display: false }
+            }
         }
     });
 
     fundamentalStatsCard.classList.remove('d-none');
 }
 
-/** 기술적 지표를 기반으로 한 투자 시그널을 해석하고 출력합니다. (✨ 중립 신호 로직 추가) */
-function renderAnalysisOutput(data) {
-    const last = (arr) => (arr && arr.length > 0 ? arr.filter(v => v !== null).pop() : null);
-    const latest = {
-        close: last(data.ohlc.close), vwap: last(data.vwap),
-        bb_upper: last(data.bbands.upper), bb_lower: last(data.bbands.lower),
-        rsi: last(data.rsi), macd_line: last(data.macd.line), macd_signal: last(data.macd.signal),
-    };
 
-    let signals = [];
-    
-    // RSI 시그널
-    if (latest.rsi !== null) {
-        if (latest.rsi > 70) signals.push({ type: 'negative', text: `<strong>RSI > 70 (${latest.rsi.toFixed(1)}):</strong> 과매수 상태입니다.` });
-        else if (latest.rsi < 30) signals.push({ type: 'positive', text: `<strong>RSI < 30 (${latest.rsi.toFixed(1)}):</strong> 과매도 상태입니다.` });
-        else signals.push({ type: 'neutral', text: `<strong>RSI (${latest.rsi.toFixed(1)}):</strong> 중립 구간에 위치하고 있습니다.` });
-    }
-
-    // 볼린저 밴드 시그널
-    if (latest.close !== null && latest.bb_upper !== null && latest.bb_lower !== null) {
-        if (latest.close > latest.bb_upper) signals.push({ type: 'negative', text: '<strong>볼린저 밴드 상단 돌파:</strong> 과매수 또는 단기 조정 가능성.' });
-        else if (latest.close < latest.bb_lower) signals.push({ type: 'positive', text: '<strong>볼린저 밴드 하단 이탈:</strong> 과매도, 기술적 반등 가능성.' });
-        else signals.push({ type: 'neutral', text: `<strong>볼린저 밴드:</strong> 주가가 밴드 내에서 안정적으로 움직이고 있습니다.` });
-    }
-    
-    // MACD 시그널
-    if (latest.macd_line !== null && latest.macd_signal !== null) {
-        if (latest.macd_line > latest.macd_signal) signals.push({ type: 'positive', text: '<strong>MACD 골든 크로스:</strong> 단기 상승 모멘텀이 강화되고 있습니다.' });
-        else signals.push({ type: 'negative', text: '<strong>MACD 데드 크로스:</strong> 단기 하락 모멘텀이 강화되고 있습니다.' });
-    }
-
-    analysisOutput.innerHTML = '';
-    const list = document.createElement('ul');
-    list.className = 'list-group list-group-flush';
-    
-    if (signals.length > 0) {
-        signals.forEach(signal => {
-            const item = document.createElement('li');
-            let icon, colorClass;
-            switch(signal.type) {
-                case 'positive': icon = '▲'; colorClass = 'text-success'; break;
-                case 'negative': icon = '▼'; colorClass = 'text-danger'; break;
-                case 'neutral': icon = '―'; colorClass = 'text-muted'; break;
-            }
-            item.className = `list-group-item d-flex align-items-center ${colorClass}`;
-            item.innerHTML = `<span class="fs-4 me-3 fw-bold">${icon}</span> <div>${signal.text}</div>`;
-            list.appendChild(item);
-        });
-    } else {
-        list.innerHTML = `<li class="list-group-item text-center text-muted">기술적 분석 데이터를 계산할 수 없습니다.</li>`;
-    }
-    analysisOutput.appendChild(list);
-}
-
-
-// --- 메인 로직 함수 ---
+// --- 메인 로직 및 차트 함수 ---
 
 /** '분석하기' 버튼 클릭 시 실행되는 메인 함수 */
 async function handleAnalysis() {
     const userInput = tickerInput.value.trim().toUpperCase();
-    if (!userInput) {
-        analysisOutput.innerHTML = `<div class="alert alert-warning">분석할 종목을 입력해주세요.</div>`;
-        return;
-    }
+    if (!userInput) return;
     
     showLoading(true);
-    analysisOutput.innerHTML = '';
 
     const ticker = /^[0-9]{6}$/.test(userInput) ? `${userInput}.KS` : userInput;
     const period = document.getElementById('period-select').value;
@@ -188,13 +187,15 @@ async function handleAnalysis() {
         }
 
         currentChartData = chartData;
-        updateChart(); 
-        renderAnalysisOutput(chartData);
+        updateChart();
+        
+        renderTechnicalAnalysisCard(chartData);
         renderStockInfo(infoData);
         renderFundamentalStats(infoData);
         saveRecentSearch(ticker);
     } catch (error) {
-        analysisOutput.innerHTML = `<div class="alert alert-danger"><strong>오류:</strong> ${error.message}</div>`;
+        technicalAnalysisContainer.innerHTML = `<div class="alert alert-danger small p-2">${error.message}</div>`;
+        technicalAnalysisCard.classList.remove('d-none');
         if (chart) chart.destroy();
     } finally {
         showLoading(false);
@@ -267,8 +268,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         const nasdaqData = Papa.parse(nasdaqText, { header: true, skipEmptyLines: true, transformHeader: h => h.trim().toLowerCase() === 'symbol' ? 'Symbol' : 'Name' }).data.map(s => ({ Symbol: s.Symbol, Name: s.Name }));
         stockList = [...krxData, ...nasdaqData].filter(s => s.Symbol && s.Name);
     } catch (e) { 
-        console.error("Could not load stock lists:", e); 
-        analysisOutput.innerHTML = `<div class="alert alert-danger">종목 목록을 불러오는데 실패했습니다.</div>`;
+        console.error("Could not load stock lists:", e);
+        technicalAnalysisContainer.innerHTML = `<div class="alert alert-danger small p-2">종목 목록을 불러오지 못했습니다.</div>`;
+        technicalAnalysisCard.classList.remove('d-none');
     }
 
     document.getElementById('analyze').addEventListener('click', handleAnalysis);
@@ -317,7 +319,7 @@ tickerInput.addEventListener('input', () => {
 
 /** 외부 클릭 시 자동완성 결과 숨기기 */
 document.addEventListener('click', (e) => {
-    if (!tickerInput.parentElement.contains(e.target)) {
+    if (tickerInput.parentElement && !tickerInput.parentElement.contains(e.target)) {
         autocompleteResults.style.display = 'none';
     }
 });
@@ -367,7 +369,11 @@ function renderPopularStocks() {
 
 /** 로컬 스토리지에서 최근 검색 목록 가져오기 */
 function getRecentSearches() {
-    return JSON.parse(localStorage.getItem('recentSearches')) || [];
+    try {
+        return JSON.parse(localStorage.getItem('recentSearches')) || [];
+    } catch (e) {
+        return [];
+    }
 }
 
 /** 최근 검색 목록을 로컬 스토리지에 저장 */
@@ -385,7 +391,7 @@ function renderRecentSearches() {
     const searches = getRecentSearches();
     searches.forEach(ticker => {
         const btnGroup = document.createElement('div');
-        btnGroup.className = 'btn-group me-1';
+        btnGroup.className = 'btn-group me-1 mb-1';
         const button = document.createElement('button');
         button.className = 'btn btn-sm btn-outline-info';
         button.textContent = ticker;

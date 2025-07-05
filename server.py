@@ -93,11 +93,24 @@ def get_stock_info():
         stock = yf.Ticker(ticker)
         info = stock.info
         if not info or not info.get('regularMarketPrice'): return jsonify({"error": f"'{ticker}'에 대한 기업 정보를 조회할 수 없습니다."}), 404
+        
+        pe_value = info.get('trailingPE')
+        pe_type = 'Trailing PE'
+        if pe_value is None:
+            pe_value = info.get('forwardPE')
+            pe_type = 'Forward PE'
+
         stats = calculate_fundamental_stats(info)
         response_data = {
             "longName": info.get("longName"), "sector": info.get("sector"), "country": info.get("country"),
             "longBusinessSummary": info.get("longBusinessSummary"), "stats": stats,
-            "rawStats": { "pe": info.get('trailingPE'), "earningsGrowth": info.get('earningsGrowth'), "roe": info.get('returnOnEquity'), "debtToEquity": info.get('debtToEquity') }
+            "rawStats": { 
+                "pe": pe_value, 
+                "pe_type": pe_type,
+                "earningsGrowth": info.get('earningsGrowth'), 
+                "roe": info.get('returnOnEquity'), 
+                "debtToEquity": info.get('debtToEquity') 
+            }
         }
         return jsonify(response_data)
     except Exception as e:

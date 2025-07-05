@@ -136,3 +136,89 @@ body {
     height: 1.2rem;
     margin-bottom: 0.75rem;
 }
+
+/* --- 신규 로딩 스피너 --- */
+.loading-spinner-dots {
+    display: inline-block;
+    position: relative;
+    width: 80px;
+    height: 80px;
+}
+.loading-spinner-dots div {
+    position: absolute;
+    top: 33px;
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    background: #0d6efd; /* 기본 로딩 색상 */
+    animation-timing-function: cubic-bezier(0, 1, 1, 0);
+}
+.loading-spinner-dots div:nth-child(1) { left: 8px; animation: lds-ellipsis1 0.6s infinite; }
+.loading-spinner-dots div:nth-child(2) { left: 8px; animation: lds-ellipsis2 0.6s infinite; }
+.loading-spinner-dots div:nth-child(3) { left: 32px; animation: lds-ellipsis2 0.6s infinite; }
+.loading-spinner-dots div:nth-child(4) { left: 56px; animation: lds-ellipsis3 0.6s infinite; }
+@keyframes lds-ellipsis1 { 0% { transform: scale(0); } 100% { transform: scale(1); } }
+@keyframes lds-ellipsis3 { 0% { transform: scale(1); } 100% { transform: scale(0); } }
+@keyframes lds-ellipsis2 { 0% { transform: translate(0, 0); } 100% { transform: translate(24px, 0); } }
+
+
+/* --- 다크 모드 테마 --- */
+[data-bs-theme="dark"] {
+    .card, .list-group-item, .modal-content, .form-control, .form-select {
+        background-color: #212529 !important; /* 어두운 카드 배경 */
+        color: #dee2e6; /* 밝은 텍스트 */
+    }
+    .card-header {
+        border-bottom-color: #495057;
+    }
+    .table {
+        --bs-table-bg: #212529;
+        --bs-table-striped-bg: #2c3034;
+        --bs-table-color: #dee2e6;
+        --bs-table-border-color: #495057;
+    }
+    .btn-outline-secondary {
+        --bs-btn-color: #adb5bd;
+        --bs-btn-border-color: #495057;
+        --bs-btn-hover-bg: #495057;
+        --bs-btn-hover-color: #fff;
+    }
+    .autocomplete-results {
+        background-color: #2c3034;
+        border-color: #495057;
+    }
+    .autocomplete-item:hover {
+        background-color: #343a40;
+    }
+    .loading-spinner-dots div {
+        background: #0dcaf0; /* 다크모드용 로딩 색상 */
+    }
+}
+
+/* 다크모드 스위치 아이콘 색상 */
+#dark-mode-label { color: #6c757d; }
+[data-bs-theme="dark"] #dark-mode-label { color: #ffc107; }
+
+
+/* --- 기타 UI --- */
+body { transition: background-color 0.3s, color 0.3s; }
+.search-wrapper .autocomplete-results {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    border: 1px solid var(--bs-border-color);
+    border-top: none;
+    max-height: 300px;
+    overflow-y: auto;
+    z-index: 1000;
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+    display: none;
+}
+.autocomplete-item {
+    padding: 0.75rem 1.25rem;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}

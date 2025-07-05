@@ -105,6 +105,35 @@
                             </div>
                         </div>
 
+                        <!-- 펀더멘탈 스탯 카드 -->
+                        <div id="fundamental-stats-card" class="card mt-4 d-none">
+                            <div class="card-header">
+                                <h5 class="mb-0">펀더멘탈 스탯 카드</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <canvas id="stats-radar-chart"></canvas>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <h4>종합 등급: <span id="stats-grade" class="badge bg-primary"></span></h4>
+                                        <ul class="list-group list-group-flush">
+                                            <li class="list-group-item d-flex justify-content-between"><strong>종합 점수:</strong> <span id="stats-total-score"></span></li>
+                                            <li class="list-group-item d-flex justify-content-between"><strong>가치(Value):</strong> <span id="stats-value-score"></span></li>
+                                            <li class="list-group-item d-flex justify-content-between"><strong>성장성(Growth):</strong> <span id="stats-growth-score"></span></li>
+                                            <li class="list-group-item d-flex justify-content-between"><strong>수익성(Profitability):</strong> <span id="stats-profitability-score"></span></li>
+                                            <li class="list-group-item d-flex justify-content-between"><strong>안정성(Stability):</strong> <span id="stats-stability-score"></span></li>
+                                        </ul>
+                                    </div>
+                                </div>
+                                <hr>
+                                <h6>원본 데이터</h6>
+                                <ul id="raw-data-list" class="list-group list-group-flush">
+                                    <!-- 원본 데이터가 여기에 동적으로 추가됩니다 -->
+                                </ul>
+                            </div>
+                        </div>
+
                         <div class="card mt-3">
                             <div id="analysis-output" class="card-body">
                                 <p class="text-muted text-center">분석할 주식을 검색해주세요.</p>

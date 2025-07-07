@@ -55,7 +55,20 @@ function renderStockInfo(info) {
 }
 
 function renderTechnicalAnalysisCard(data) {
-    const last = (arr) => (arr && arr.length > 0 ? arr.filter(v => v !== null).pop() : null);
+    const last = (arr) => {
+        // 배열이 없거나 비어있는 경우 null 반환
+        if (!arr || !Array.isArray(arr) || arr.length === 0) {
+            return null;
+        }
+        // null이 아닌 값들만 필터링
+        const filtered = arr.filter(v => v !== null);
+        // 필터링 후 배열이 비어있다면 null 반환 (모든 값이 null이었던 경우)
+        if (filtered.length === 0) {
+            return null;
+        }
+        // 마지막 유효한 값 반환
+        return filtered[filtered.length - 1];
+    };
     const latest = {
         close: last(data.ohlc.close), rsi: last(data.rsi), macd_line: last(data.macd.line),
         macd_signal: last(data.macd.signal), bb_upper: last(data.bbands.upper), bb_lower: last(data.bbands.lower),

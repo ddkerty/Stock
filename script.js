@@ -167,7 +167,8 @@ async function handleAnalysis() {
 
     const ticker = /^[0-9]{6}$/.test(userInput) ? `${userInput}.KS` : userInput;
     const period = document.getElementById('period-select').value;
-    let interval;
+
+    let interval; // 'const' 대신 'let'으로 변경하여 재할당 가능하게 함
     if (period === '1d') {
         interval = '5m'; // 1일 기간에는 5분 간격 데이터를 요청
     } else if (period === '7d') {
@@ -175,6 +176,7 @@ async function handleAnalysis() {
     } else {
         interval = '1d'; // 그 외 기간에는 1일 간격 데이터를 요청
     }
+
     const chartApiUrl = `/api/stock?ticker=${ticker}&range=${period}&interval=${interval}`;
     const infoApiUrl = `/api/stock/info?ticker=${ticker}`;
 

@@ -26,8 +26,8 @@ const technicalAnalysisCard = document.getElementById('technical-analysis-card')
 const technicalAnalysisContainer = document.getElementById('technical-analysis-container');
 const darkModeSwitch = document.getElementById('dark-mode-switch');
 const darkModeLabel = document.getElementById('dark-mode-label');
-const periodGroup = document.getElementById('period-group');
-const intervalGroup = document.getElementById('interval-group');
+const periodSelect = document.getElementById('period-select');
+const intervalSelect = document.getElementById('interval-select');
 
 
 // --- 데이터 ---
@@ -214,17 +214,27 @@ async function handleAnalysis() {
 
     const ticker = /^[0-9]{6}$/.test(userInput) ? `${userInput}.KS` : userInput;
     
-    // ## 핵심 수정: 각 그룹에서 선택된 값을 가져옵니다.
-    let period = periodGroup.querySelector('input:checked').value;
-    const interval = intervalGroup.querySelector('input:checked').value;
+    // ## 핵심 수정: 각 드롭다운에서 선택된 값을 가져옵니다.
+    const period = periodSelect.value;
+    const interval = intervalSelect.value;
 
-    // ## 핵심 수정: yfinance API 제약조건에 맞춰 기간(period)을 자동으로 보정합니다.
-    if (interval === '5m' && ['1y', 'max'].includes(period)) {
-        period = '1mo'; // 5분봉은 최대 60일이지만, 여유있게 1달로 보정
-        document.getElementById('p-1mo').checked = true;
-    } else if (interval === '1h' && period === 'max') {
-        period = '1y'; // 1시간봉은 최대 730일이지만, 1년으로 보정
-        document.getElementById('p-1y').checked = true;
+    // ## 핵심 수정: yfinance API 제약조건 유효성 검사
+    const periodInDays = { '1d': 1, '5d': 5, '1mo': 30, '1y': 365, 'max': Infinity };
+    const selectedPeriodDays = periodInDays[period];
+    let errorMessage = '';
+
+    if (['1m', '5m'].includes(interval) && selectedPeriodDays > 60) {
+        errorMessage = `분봉 데이터는 최근 60일까지만 조회가 가능합니다. 기간을 '1개월' 이하로 선택해주세요.`;
+    } else if (interval === '1h' && selectedPeriodDays > 730) {
+        errorMessage = `시간봉 데이터는 최근 2년까지만 조회가 가능합니다. 기간을 '1년' 이하로 선택해주세요.`;
+    }
+
+    if (errorMessage) {
+        technicalAnalysisCard.classList.remove('d-none');
+        technicalAnalysisContainer.innerHTML = `<div class="alert alert-danger small p-2 m-0">${errorMessage}</div>`;
+        if (chart) chart.destroy();
+        showLoading(false);
+        return; // 유효하지 않은 조합이면 분석 중단
     }
     
     const chartApiUrl = `/api/stock?ticker=${ticker}&range=${period}&interval=${interval}`;
@@ -236,13 +246,7 @@ async function handleAnalysis() {
         const infoData = await infoRes.json();
 
         if (chartData.error || infoData.error) {
-            let errorMessage = chartData.error || infoData.error || '데이터를 가져오지 못했습니다.';
-            if (typeof errorMessage === 'object') errorMessage = JSON.stringify(errorMessage);
-            
-            if (errorMessage.includes("data is only available for last")) {
-                 errorMessage = "선택하신 기간에 대한 단기 데이터를 조회할 수 없습니다. 기간을 줄여 다시 시도해주세요.";
-            }
-            throw new Error(errorMessage);
+            throw new Error(chartData.error || infoData.error || '데이터를 가져오지 못했습니다.');
         }
 
         currentChartData = chartData;

@@ -33,37 +33,31 @@
                         </div>
                     </div>
                     <div class="col-lg-6">
-                        <!-- ## 핵심 수정: input-group 대신 btn-toolbar를 사용하여 버튼 그룹 간의 여백을 확보합니다. ## -->
-                        <div class="btn-toolbar" role="toolbar" aria-label="Toolbar with button groups">
-                             <div id="period-group" class="btn-group btn-group-lg me-3" role="group" aria-label="Period group">
-                                <input type="radio" class="btn-check" name="period" id="p-5d" value="5d" autocomplete="off">
-                                <label class="btn btn-outline-secondary" for="p-5d">5일</label>
-                                
-                                <input type="radio" class="btn-check" name="period" id="p-1mo" value="1mo" autocomplete="off">
-                                <label class="btn btn-outline-secondary" for="p-1mo">1개월</label>
-
-                                <input type="radio" class="btn-check" name="period" id="p-1y" value="1y" autocomplete="off" checked>
-                                <label class="btn btn-outline-secondary" for="p-1y">1년</label>
-
-                                <input type="radio" class="btn-check" name="period" id="p-max" value="max" autocomplete="off">
-                                <label class="btn btn-outline-secondary" for="p-max">전체</label>
+                        <!-- ## 핵심 수정: 버튼 그룹을 두 개의 드롭다운 메뉴로 변경 ## -->
+                        <div class="row g-2">
+                            <div class="col">
+                                <select id="period-select" class="form-select form-select-lg">
+                                    <option value="1d">1일</option>
+                                    <option value="5d">1주</option>
+                                    <option value="1mo">1개월</option>
+                                    <option value="1y" selected>1년</option>
+                                    <option value="max">전체</option>
+                                </select>
                             </div>
-                            <div id="interval-group" class="btn-group btn-group-lg" role="group" aria-label="Interval group">
-                                <input type="radio" class="btn-check" name="interval" id="i-5m" value="5m" autocomplete="off">
-                                <label class="btn btn-outline-secondary" for="i-5m">5분</label>
-
-                                <input type="radio" class="btn-check" name="interval" id="i-1h" value="1h" autocomplete="off">
-                                <label class="btn btn-outline-secondary" for="i-1h">1시간</label>
-
-                                <input type="radio" class="btn-check" name="interval" id="i-1d" value="1d" autocomplete="off" checked>
-                                <label class="btn btn-outline-secondary" for="i-1d">일봉</label>
-
-                                <input type="radio" class="btn-check" name="interval" id="i-1wk" value="1wk" autocomplete="off">
-                                <label class="btn btn-outline-secondary" for="i-1wk">주봉</label>
+                            <div class="col">
+                                <select id="interval-select" class="form-select form-select-lg">
+                                    <option value="1m">1분봉</option>
+                                    <option value="5m">5분봉</option>
+                                    <option value="1h">1시간봉</option>
+                                    <option value="1d" selected>일봉</option>
+                                    <option value="1wk">주봉</option>
+                                </select>
                             </div>
-                            <button id="analyze" class="btn btn-primary btn-lg ms-3">
-                                <i class="bi bi-search"></i>
-                            </button>
+                            <div class="col-auto">
+                                <button id="analyze" class="btn btn-primary btn-lg">
+                                    <i class="bi bi-search"></i> 분석하기
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>

@@ -1,4 +1,4 @@
-# server.py (Final Version - Including Web Page Serving)
+# server.py (최종 수정 및 캐싱 적용 버전)
 
 import logging
 import numpy as np
@@ -6,27 +6,28 @@ import pandas as pd
 import yfinance as yf
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
-from flask_caching import Cache
+from flask_caching import Cache # ## 1. 캐싱 라이브러리 임포트
 
-# --- Flask 앱 설정 ---
+# --- Flask 앱 및 캐시 설정 ---
 app = Flask(__name__, static_folder='.', static_url_path='')
 CORS(app)
-# 캐시 설정: SimpleCache (운영 환경에서는 Redis 등 권장)
-cache = Cache(app, config={
-    'CACHE_TYPE': 'SimpleCache',
-    'CACHE_DEFAULT_TIMEOUT': 3600  # 1시간
-})
 logging.basicConfig(level=logging.INFO)
 
-# --- 웹 페이지 및 정적 파일 라우팅 ---
+# ## 2. 캐시 설정 (1시간 동안 서버 메모리에 데이터 저장)
+cache = Cache(app, config={
+    'CACHE_TYPE': 'SimpleCache',
+    'CACHE_DEFAULT_TIMEOUT': 3600 
+})
 
+
+# --- 웹 페이지 및 정적 파일 라우팅 ---
 @app.route('/')
 def serve_index():
     """index.html 파일을 서비스합니다."""
     return send_from_directory('.', 'index.html')
 
+
 # --- 직접 만드는 기술적 분석 함수들 ---
-# (이전과 동일한 코드, 변경 없음)
 def calculate_bbands(close, length=20, std=2):
     middle_band = close.rolling(window=length).mean()
     std_dev = close.rolling(window=length).std()
@@ -53,9 +54,10 @@ def calculate_vwap(high, low, close, volume):
     typical_price = (high + low + close) / 3
     return (typical_price * volume).cumsum() / volume.cumsum()
 
+
 # --- API 1: 차트 데이터 (기술적 분석) ---
 @app.route('/api/stock')
-@cache.memoize()
+@cache.memoize() # ## 3. API 응답 캐싱 적용
 def get_stock_data():
     ticker = request.args.get('ticker')
     data_range = request.args.get('range', '1y')
@@ -76,13 +78,14 @@ def get_stock_data():
         macd_line, macd_signal, macd_hist = calculate_macd(data['Close'])
         vwap = calculate_vwap(data['High'], data['Low'], data['Close'], data['Volume'])
 
+        # ## 4. 오류 수정: '무한대(inf)' 값을 처리하는 로직 추가
         response_data = {
             "timestamp": [int(t.timestamp()) for t in data.index],
             "ohlc": { "open": data['Open'].replace({np.nan: None}).tolist(), "high": data['High'].replace({np.nan: None}).tolist(), "low": data['Low'].replace({np.nan: None}).tolist(), "close": data['Close'].replace({np.nan: None}).tolist(), "volume": data['Volume'].replace({np.nan: None}).tolist(), },
-            "bbands": { "upper": bbu.replace({np.nan: None}).tolist(), "middle": bbm.replace({np.nan: None}).tolist(), "lower": bbl.replace({np.nan: None}).tolist(), },
-            "rsi": rsi.replace({np.nan: None}).tolist(),
-            "macd": { "line": macd_line.replace({np.nan: None}).tolist(), "signal": macd_signal.replace({np.nan: None}).tolist(), "histogram": macd_hist.replace({np.nan: None}).tolist(), },
-            "vwap": vwap.replace({np.nan: None}).tolist(),
+            "bbands": { "upper": bbu.replace([np.inf, -np.inf], np.nan).replace({np.nan: None}).tolist(), "middle": bbm.replace([np.inf, -np.inf], np.nan).replace({np.nan: None}).tolist(), "lower": bbl.replace([np.inf, -np.inf], np.nan).replace({np.nan: None}).tolist(), },
+            "rsi": rsi.replace([np.inf, -np.inf], np.nan).replace({np.nan: None}).tolist(),
+            "macd": { "line": macd_line.replace([np.inf, -np.inf], np.nan).replace({np.nan: None}).tolist(), "signal": macd_signal.replace([np.inf, -np.inf], np.nan).replace({np.nan: None}).tolist(), "histogram": macd_hist.replace([np.inf, -np.inf], np.nan).replace({np.nan: None}).tolist(), },
+            "vwap": vwap.replace([np.inf, -np.inf], np.nan).replace({np.nan: None}).tolist(),
         }
         return jsonify(response_data)
 
@@ -90,10 +93,10 @@ def get_stock_data():
         logging.error(f"Error in get_stock_data for {ticker}: {e}")
         return jsonify({"error": "차트 데이터 조회 중 오류 발생", "details": str(e)}), 500
 
+
 # --- API 2: 기업 정보 (펀더멘탈 스탯) 및 계산 모델 ---
-# (이전과 동일한 코드, 변경 없음)
 @app.route('/api/stock/info')
-@cache.memoize()
+@cache.memoize() # ## 3. API 응답 캐싱 적용
 def get_stock_info():
     ticker = request.args.get('ticker')
     if not ticker: return jsonify({"error": "Ticker is required"}), 400
@@ -160,6 +163,7 @@ def get_grade(score):
     if score >= 60: return "C (보통)"
     if score >= 50: return "D (주의)"
     return "F (위험)"
+
 
 # --- 앱 실행 ---
 if __name__ == '__main__':

@@ -54,56 +54,105 @@ function renderStockInfo(info) {
     stockInfoCard.classList.remove('d-none');
 }
 
+/**
+ * 기술적 지표를 투자 전문가의 관점에서 분석하고, 종합 의견을 포함하여 렌더링합니다.
+ * '상태'가 아닌 '변화(이벤트)'를 감지하고, 여러 지표를 종합하여 최종 의견을 제시합니다.
+ * @param {object} data - 서버로부터 받은 차트 및 지표 데이터
+ */
 function renderTechnicalAnalysisCard(data) {
-    const last = (arr) => {
-        // 배열이 없거나 비어있는 경우 null 반환
-        if (!arr || !Array.isArray(arr) || arr.length === 0) {
-            return null;
-        }
-        // null이 아닌 값들만 필터링
-        const filtered = arr.filter(v => v !== null);
-        // 필터링 후 배열이 비어있다면 null 반환 (모든 값이 null이었던 경우)
-        if (filtered.length === 0) {
-            return null;
-        }
-        // 마지막 유효한 값 반환
-        return filtered[filtered.length - 1];
-    };
-    const latest = {
-        close: last(data.ohlc.close), rsi: last(data.rsi), macd_line: last(data.macd.line),
-        macd_signal: last(data.macd.signal), bb_upper: last(data.bbands.upper), bb_lower: last(data.bbands.lower),
-    };
+    const signals = [];
+    let summaryScore = 0; // 종합 의견을 위한 점수. +는 긍정, -는 부정
 
-    let signals = [];
-    if (latest.rsi !== null) {
-        if (latest.rsi > 70) signals.push({ type: 'negative', text: `<strong>RSI (${latest.rsi.toFixed(1)}):</strong> 과매수` });
-        else if (latest.rsi < 30) signals.push({ type: 'positive', text: `<strong>RSI (${latest.rsi.toFixed(1)}):</strong> 과매도` });
-        else signals.push({ type: 'neutral', text: `<strong>RSI (${latest.rsi.toFixed(1)}):</strong> 중립` });
-    }
-    if (latest.close !== null && latest.bb_upper !== null) {
-        if (latest.close > latest.bb_upper) signals.push({ type: 'negative', text: '<strong>볼린저 밴드:</strong> 상단 돌파' });
-        else if (latest.close < latest.bb_lower) signals.push({ type: 'positive', text: '<strong>볼린저 밴드:</strong> 하단 이탈' });
-        else signals.push({ type: 'neutral', text: '<strong>볼린저 밴드:</strong> 밴드 내 위치' });
-    }
-    if (latest.macd_line !== null && latest.macd_signal !== null) {
-        if (latest.macd_line > latest.macd_signal) signals.push({ type: 'positive', text: '<strong>MACD:</strong> 골든 크로스' });
-        else signals.push({ type: 'negative', text: '<strong>MACD:</strong> 데드 크로스' });
+    // --- 데이터 준비: 마지막 2개의 유효한 데이터 포인트를 가져옵니다. ---
+    const lastN = (arr, n) => (arr ? arr.filter(v => v !== null).slice(-n) : []);
+    const [prev, latest] = lastN(data.ohlc.close, 2);
+    const [prevRsi, latestRsi] = lastN(data.rsi, 2);
+    const [prevMacd, latestMacd] = lastN(data.macd.line, 2);
+    const [prevSignal, latestSignal] = lastN(data.macd.signal, 2);
+    const [prevUpper, latestUpper] = lastN(data.bbands.upper, 2);
+    const [prevLower, latestLower] = lastN(data.bbands.lower, 2);
+
+    // --- 1. RSI 분석 (과매수/과매도 '진입' 시점을 포착) ---
+    if (latestRsi !== undefined && prevRsi !== undefined) {
+        if (latestRsi > 70 && prevRsi <= 70) {
+            signals.push({ type: 'negative', text: 'RSI, 과매수 구간 진입', score: -1 });
+        } else if (latestRsi < 30 && prevRsi >= 30) {
+            signals.push({ type: 'positive', text: 'RSI, 과매도 구간 진입', score: 1 });
+        } else if (latestRsi > 70) {
+            signals.push({ type: 'neutral', text: `RSI (${latestRsi.toFixed(1)}), 과열 상태 지속`, score: 0 });
+        } else if (latestRsi < 30) {
+            signals.push({ type: 'neutral', text: `RSI (${latestRsi.toFixed(1)}), 침체 상태 지속`, score: 0 });
+        }
     }
 
-    let signalHtml = `<li class="list-group-item text-center text-muted small">신호 없음</li>`;
+    // --- 2. MACD 분석 (골든/데드 크로스 '발생' 시점을 포착) ---
+    if (latestMacd !== undefined && prevMacd !== undefined && latestSignal !== undefined && prevSignal !== undefined) {
+        const wasAbove = prevMacd > prevSignal;
+        const isAbove = latestMacd > latestSignal;
+        if (isAbove && !wasAbove) {
+            signals.push({ type: 'positive', text: 'MACD, 골든 크로스 발생', score: 2 }); // 크로스는 중요한 신호이므로 가중치 부여
+        } else if (!isAbove && wasAbove) {
+            signals.push({ type: 'negative', text: 'MACD, 데드 크로스 발생', score: -2 });
+        }
+    }
+
+    // --- 3. 볼린저 밴드 분석 (밴드 '돌파' 또는 '회귀'를 포착) ---
+    if (latest !== undefined && prev !== undefined && latestUpper !== undefined && latestLower !== undefined) {
+        // 상단 돌파 (Breakout)
+        if (latest > latestUpper && prev <= prevUpper) {
+            signals.push({ type: 'positive', text: '볼린저 밴드, 상단 돌파 (강세 신호)', score: 1 });
+        // 하단 돌파 (Breakdown)
+        } else if (latest < latestLower && prev >= prevLower) {
+            signals.push({ type: 'negative', text: '볼린저 밴드, 하단 이탈 (약세 신호)', score: -1 });
+        // 밴드 안으로 복귀 (평균 회귀)
+        } else if (latest < latestUpper && prev >= latestUpper) {
+            signals.push({ type: 'negative', text: '볼린저 밴드, 과열 후 밴드 복귀', score: -1 });
+        } else if (latest > latestLower && prev <= latestLower) {
+            signals.push({ type: 'positive', text: '볼린저 밴드, 침체 후 밴드 복귀', score: 1 });
+        }
+    }
+    
+    // --- 4. 종합 의견 생성 ---
+    summaryScore = signals.reduce((acc, signal) => acc + signal.score, 0);
+    
+    let summary;
+    if (summaryScore >= 2) {
+        summary = { text: '매수 고려', detail: '여러 지표에서 긍정적 신호가 발생했습니다.', type: 'positive' };
+    } else if (summaryScore > 0) {
+        summary = { text: '주의 깊은 관찰 (긍정적)', detail: '일부 긍정적 신호가 포착되었습니다.', type: 'positive' };
+    } else if (summaryScore === 0) {
+        summary = { text: '중립 / 혼조세', detail: '뚜렷한 방향성이 없거나 신호가 엇갈립니다.', type: 'neutral' };
+    } else if (summaryScore < 0 && summaryScore >= -1) {
+        summary = { text: '주의 깊은 관찰 (부정적)', detail: '일부 부정적 신호가 포착되었습니다.', type: 'negative' };
+    } else { // summaryScore <= -2
+        summary = { text: '매도 고려 / 위험 관리', detail: '여러 지표에서 부정적 신호가 발생했습니다.', type: 'negative' };
+    }
+
+    // --- 5. HTML 렌더링 ---
+    let signalHtml = `<li class="list-group-item text-center text-muted small">감지된 주요 신호 없음</li>`;
     if (signals.length > 0) {
-        signalHtml = signals.map(signal => {
-            let icon, colorClass;
-            switch (signal.type) {
-                case 'positive': icon = '▲'; colorClass = 'text-success'; break;
-                case 'negative': icon = '▼'; colorClass = 'text-danger'; break;
-                default: icon = '―'; colorClass = 'text-muted'; break;
-            }
-            return `<li class="list-group-item d-flex align-items-center ${colorClass} small py-2"><span class="fs-5 me-2 fw-bold">${icon}</span> ${signal.text}</li>`;
-        }).join('');
+        signalHtml = signals
+            .sort((a, b) => b.score - a.score) // 중요도(점수) 순으로 정렬
+            .map(signal => {
+                let icon, colorClass;
+                switch (signal.type) {
+                    case 'positive': icon = '▲'; colorClass = 'text-success'; break;
+                    case 'negative': icon = '▼'; colorClass = 'text-danger'; break;
+                    default: icon = '―'; colorClass = 'text-muted'; break;
+                }
+                return `<li class="list-group-item d-flex align-items-center ${colorClass} small py-2"><span class="fs-5 me-2 fw-bold">${icon}</span> ${signal.text}</li>`;
+            }).join('');
     }
 
-    technicalAnalysisContainer.innerHTML = `<ul class="list-group list-group-flush">${signalHtml}</ul>`;
+    const summaryColorClasses = { positive: 'bg-success-subtle text-success-emphasis', negative: 'bg-danger-subtle text-danger-emphasis', neutral: 'bg-secondary-subtle text-secondary-emphasis' };
+    
+    technicalAnalysisContainer.innerHTML = `
+        <div class="p-3 ${summaryColorClasses[summary.type]}">
+            <h6 class="mb-1 fw-bold">종합 의견: ${summary.text}</h6>
+            <p class="mb-0 small">${summary.detail}</p>
+        </div>
+        <ul class="list-group list-group-flush">${signalHtml}</ul>
+    `;
     technicalAnalysisCard.classList.remove('d-none');
 }
 

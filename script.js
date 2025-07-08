@@ -26,6 +26,9 @@ const technicalAnalysisCard = document.getElementById('technical-analysis-card')
 const technicalAnalysisContainer = document.getElementById('technical-analysis-container');
 const darkModeSwitch = document.getElementById('dark-mode-switch');
 const darkModeLabel = document.getElementById('dark-mode-label');
+const periodGroup = document.getElementById('period-group');
+const intervalGroup = document.getElementById('interval-group');
+
 
 // --- 데이터 ---
 const popularTickers = [
@@ -54,20 +57,13 @@ function renderStockInfo(info) {
     stockInfoCard.classList.remove('d-none');
 }
 
-/**
- * ## 여기가 완전히 새로워진 최종 분석 엔진입니다! ##
- * 현진님의 상세 분석 로직을 JavaScript로 구현하고, 전문가의 종합 의견을 더했습니다.
- * @param {object} data - 서버로부터 받은 차트 및 지표 데이터
- */
 function renderTechnicalAnalysisCard(data) {
     const signals = [];
     let summaryScore = 0;
 
-    // --- 데이터 준비 ---
     const lastN = (arr, n) => (arr ? arr.filter(v => v !== null).slice(-n) : []);
     const [prevClose, latestClose] = lastN(data.ohlc.close, 2);
     
-    // --- 1. 피보나치 되돌림 분석 (현진님 로직 JavaScript로 구현) ---
     const validHighs = data.ohlc.high.filter(v => v !== null);
     const validLows = data.ohlc.low.filter(v => v !== null);
     if (validHighs.length > 1 && validLows.length > 1 && latestClose !== undefined) {
@@ -80,7 +76,6 @@ function renderTechnicalAnalysisCard(data) {
                 0.0: high, 0.236: high - 0.236 * diff, 0.382: high - 0.382 * diff,
                 0.5: high - 0.5 * diff, 0.618: high - 0.618 * diff, 1.0: low,
             };
-
             let nearestLevel = { ratio: null, price: null, distance: Infinity };
             for (const [ratio, lvl_price] of Object.entries(levels)) {
                 const distance = Math.abs(latestClose - lvl_price);
@@ -88,15 +83,11 @@ function renderTechnicalAnalysisCard(data) {
                     nearestLevel = { ratio: Number(ratio), price: lvl_price, distance: distance };
                 }
             }
-
-            if (nearestLevel.distance / diff < 0.02) { // 2% 이내 근접 시
+            if (nearestLevel.distance / diff < 0.02) {
                 const comments = {
-                    0.236: "얕은 되돌림 후 강세 재개 가능성",
-                    0.382: "첫 번째 핵심 지지선",
-                    0.5:   "추세가 중립으로 전환되는 분기점",
-                    0.618: "되돌림의 마지막 보루로 평가",
-                    1.0:   "저점 지지 테스트 중",
-                    0.0:   "고점 부근, 차익 실현 압력 주의",
+                    0.236: "얕은 되돌림 후 강세 재개 가능성", 0.382: "첫 번째 핵심 지지선",
+                    0.5: "추세가 중립으로 전환되는 분기점", 0.618: "되돌림의 마지막 보루로 평가",
+                    1.0: "저점 지지 테스트 중", 0.0: "고점 부근, 차익 실현 압력 주의",
                 };
                 const text = comments[nearestLevel.ratio] || `피보나치 ${nearestLevel.ratio.toFixed(3)} 레벨 근처`;
                 signals.push({ type: 'neutral', text: `🔍 **피보나치:** ${text} ($${nearestLevel.price.toFixed(2)})`, score: 0 });
@@ -104,7 +95,6 @@ function renderTechnicalAnalysisCard(data) {
         }
     }
 
-    // --- 2. VWAP 분석 ---
     const latestVwap = lastN(data.vwap, 1)[0];
     if (latestClose !== undefined && latestVwap !== undefined) {
         if (latestClose > latestVwap) {
@@ -114,7 +104,6 @@ function renderTechnicalAnalysisCard(data) {
         }
     }
 
-    // --- 3. 볼린저 밴드 분석 ---
     const latestUpper = lastN(data.bbands.upper, 1)[0];
     const latestLower = lastN(data.bbands.lower, 1)[0];
     if (latestClose !== undefined && latestUpper !== undefined && latestLower !== undefined) {
@@ -125,89 +114,55 @@ function renderTechnicalAnalysisCard(data) {
             signals.push({ type: 'negative', text: '📉 **볼린저밴드:** 하단 이탈 (약세 추세)', score: -1.5 });
         } else if (bandWidth > 0) {
             const positionRatio = (latestClose - latestLower) / bandWidth;
-            if (positionRatio > 0.75) {
-                signals.push({ type: 'neutral', text: '🟢 **볼린저밴드:** 밴드 상단 근접', score: 0 });
-            } else if (positionRatio < 0.25) {
-                signals.push({ type: 'neutral', text: '🔴 **볼린저밴드:** 밴드 하단 근접', score: 0 });
-            }
+            if (positionRatio > 0.75) signals.push({ type: 'neutral', text: '🟢 **볼린저밴드:** 밴드 상단 근접', score: 0 });
+            else if (positionRatio < 0.25) signals.push({ type: 'neutral', text: '🔴 **볼린저밴드:** 밴드 하단 근접', score: 0 });
         }
     }
 
-    // --- 4. RSI 분석 ---
     const [prevRsi, latestRsi] = lastN(data.rsi, 2);
     if (latestRsi !== undefined) {
-        if (latestRsi > 70) {
-            signals.push({ type: 'negative', text: `📈 **RSI (${latestRsi.toFixed(1)}):** 과매수 영역`, score: -1 });
-        } else if (latestRsi < 30) {
-            signals.push({ type: 'positive', text: `📉 **RSI (${latestRsi.toFixed(1)}):** 과매도 영역`, score: 1 });
-        } else if (latestRsi > 50) {
-            signals.push({ type: 'neutral', text: `🟢 **RSI (${latestRsi.toFixed(1)}):** 50 이상, 상승 추세 우위`, score: 0 });
-        } else {
-            signals.push({ type: 'neutral', text: `🔴 **RSI (${latestRsi.toFixed(1)}):** 50 이하, 하락 추세 우위`, score: 0 });
-        }
+        if (latestRsi > 70) signals.push({ type: 'negative', text: `📈 **RSI (${latestRsi.toFixed(1)}):** 과매수 영역`, score: -1 });
+        else if (latestRsi < 30) signals.push({ type: 'positive', text: `📉 **RSI (${latestRsi.toFixed(1)}):** 과매도 영역`, score: 1 });
+        else if (latestRsi > 50) signals.push({ type: 'neutral', text: `🟢 **RSI (${latestRsi.toFixed(1)}):** 50 이상, 상승 추세 우위`, score: 0 });
+        else signals.push({ type: 'neutral', text: `🔴 **RSI (${latestRsi.toFixed(1)}):** 50 이하, 하락 추세 우위`, score: 0 });
     }
 
-    // --- 5. MACD 분석 ---
     const [prevMacd, latestMacd] = lastN(data.macd.line, 2);
     const [prevSignal, latestSignal] = lastN(data.macd.signal, 2);
      if (latestMacd !== undefined && prevMacd !== undefined && latestSignal !== undefined && prevSignal !== undefined) {
         const wasAbove = prevMacd > prevSignal;
         const isAbove = latestMacd > latestSignal;
-        if (isAbove && !wasAbove) {
-            signals.push({ type: 'positive', text: '🟢 **MACD:** 골든 크로스 발생!', score: 2 });
-        } else if (!isAbove && wasAbove) {
-            signals.push({ type: 'negative', text: '🔴 **MACD:** 데드 크로스 발생!', score: -2 });
-        } else if (isAbove) {
-            signals.push({ type: 'neutral', text: '↔️ **MACD:** 상승 추세 유지 중', score: 0 });
-        } else {
-             signals.push({ type: 'neutral', text: '↔️ **MACD:** 하락 추세 유지 중', score: 0 });
-        }
+        if (isAbove && !wasAbove) signals.push({ type: 'positive', text: '🟢 **MACD:** 골든 크로스 발생!', score: 2 });
+        else if (!isAbove && wasAbove) signals.push({ type: 'negative', text: '🔴 **MACD:** 데드 크로스 발생!', score: -2 });
+        else if (isAbove) signals.push({ type: 'neutral', text: '↔️ **MACD:** 상승 추세 유지 중', score: 0 });
+        else signals.push({ type: 'neutral', text: '↔️ **MACD:** 하락 추세 유지 중', score: 0 });
     }
     
-    // --- 6. 종합 의견 생성 ---
     summaryScore = signals.reduce((acc, signal) => acc + signal.score, 0);
     let summary;
-    if (signals.length === 0) {
-        summary = { text: '분석 불가', detail: '기술적 신호를 계산하기에 데이터가 부족합니다.', type: 'neutral' };
-    } else if (summaryScore >= 3) {
-        summary = { text: '강력 매수 고려', detail: '다수의 강력한 긍정 신호가 포착되었습니다.', type: 'positive' };
-    } else if (summaryScore >= 1) {
-        summary = { text: '매수 우위', detail: '긍정적인 신호가 우세합니다.', type: 'positive' };
-    } else if (summaryScore > -1) {
-        summary = { text: '중립 / 혼조세', detail: '신호가 엇갈리거나 뚜렷한 방향성이 없습니다.', type: 'neutral' };
-    } else if (summaryScore > -3) {
-        summary = { text: '매도 우위', detail: '부정적인 신호가 우세합니다.', type: 'negative' };
-    } else {
-        summary = { text: '강력 매도 고려', detail: '다수의 강력한 부정 신호가 포착되었습니다.', type: 'negative' };
-    }
+    if (signals.length === 0) summary = { text: '분석 불가', detail: '기술적 신호를 계산하기에 데이터가 부족합니다.', type: 'neutral' };
+    else if (summaryScore >= 3) summary = { text: '강력 매수 고려', detail: '다수의 강력한 긍정 신호가 포착되었습니다.', type: 'positive' };
+    else if (summaryScore >= 1) summary = { text: '매수 우위', detail: '긍정적인 신호가 우세합니다.', type: 'positive' };
+    else if (summaryScore > -1) summary = { text: '중립 / 혼조세', detail: '신호가 엇갈리거나 뚜렷한 방향성이 없습니다.', type: 'neutral' };
+    else if (summaryScore > -3) summary = { text: '매도 우위', detail: '부정적인 신호가 우세합니다.', type: 'negative' };
+    else summary = { text: '강력 매도 고려', detail: '다수의 강력한 부정 신호가 포착되었습니다.', type: 'negative' };
 
-    // --- 7. HTML 렌더링 ---
     let signalHtml = `<li class="list-group-item text-center text-muted small">감지된 기술적 신호가 없습니다.</li>`;
     if (signals.length > 0) {
-        signalHtml = signals
-            .sort((a, b) => Math.abs(b.score) - Math.abs(a.score))
-            .map(signal => {
-                let colorClass;
-                switch (signal.type) {
-                    case 'positive': colorClass = 'text-success'; break;
-                    case 'negative': colorClass = 'text-danger'; break;
-                    default: colorClass = 'text-muted'; break;
-                }
-                // 마크다운(**)을 HTML <strong> 태그로 변환
-                const formattedText = signal.text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-                return `<li class="list-group-item ${colorClass} small py-2">${formattedText}</li>`;
-            }).join('');
+        signalHtml = signals.sort((a, b) => Math.abs(b.score) - Math.abs(a.score)).map(signal => {
+            let colorClass = signal.type === 'positive' ? 'text-success' : (signal.type === 'negative' ? 'text-danger' : 'text-muted');
+            const formattedText = signal.text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+            return `<li class="list-group-item ${colorClass} small py-2">${formattedText}</li>`;
+        }).join('');
     }
 
     const summaryColorClasses = { positive: 'bg-success-subtle text-success-emphasis', negative: 'bg-danger-subtle text-danger-emphasis', neutral: 'bg-secondary-subtle text-secondary-emphasis' };
-    
     technicalAnalysisContainer.innerHTML = `
         <div class="p-3 ${summaryColorClasses[summary.type]}">
             <h6 class="mb-1 fw-bold">종합 의견: ${summary.text}</h6>
             <p class="mb-0 small">${summary.detail}</p>
         </div>
-        <ul class="list-group list-group-flush">${signalHtml}</ul>
-    `;
+        <ul class="list-group list-group-flush">${signalHtml}</ul>`;
     technicalAnalysisCard.classList.remove('d-none');
 }
 
@@ -222,14 +177,11 @@ function renderFundamentalStats(info) {
     gradeBadge.textContent = stats.grade;
     const gradeColors = { "A (매우 우수)": 'bg-danger', "B (우수)": 'bg-primary', "C (보통)": 'bg-success', "D (주의)": 'bg-warning', "F (위험)": 'bg-secondary' };
     gradeBadge.className = `badge fs-5 ${gradeColors[stats.grade] || 'bg-dark'}`;
-
     const rawDataList = document.getElementById('raw-data-list');
     rawDataList.innerHTML = `
         <li class="list-group-item d-flex justify-content-between align-items-center small py-1"><strong>종합 점수:</strong> <span class="badge bg-dark rounded-pill">${stats.totalScore.toFixed(2)}</span></li>
         <li class="list-group-item d-flex justify-content-between align-items-center small py-1">${rawStats.pe_type || 'PE'}: <span>${rawStats.pe ? rawStats.pe.toFixed(2) : 'N/A'}</span></li>
-        <li class="list-group-item d-flex justify-content-between align-items-center small py-1">ROE: <span>${rawStats.roe ? (rawStats.roe * 100).toFixed(2) + '%' : 'N/A'}</span></li>
-    `;
-
+        <li class="list-group-item d-flex justify-content-between align-items-center small py-1">ROE: <span>${rawStats.roe ? (rawStats.roe * 100).toFixed(2) + '%' : 'N/A'}</span></li>`;
     const ctx = document.getElementById('stats-radar-chart').getContext('2d');
     if (statsRadarChart) statsRadarChart.destroy();
     statsRadarChart = new Chart(ctx, {
@@ -246,19 +198,9 @@ function renderFundamentalStats(info) {
             }]
         },
         options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                r: {
-                    suggestedMin: 0,
-                    suggestedMax: 100,
-                    pointLabels: { font: { size: 12 } },
-                    ticks: { display: false }
-                }
-            },
-            plugins: {
-                legend: { display: false }
-            }
+            responsive: true, maintainAspectRatio: false,
+            scales: { r: { suggestedMin: 0, suggestedMax: 100, pointLabels: { font: { size: 12 } }, ticks: { display: false } } },
+            plugins: { legend: { display: false } }
         }
     });
     fundamentalStatsCard.classList.remove('d-none');
@@ -271,8 +213,20 @@ async function handleAnalysis() {
     showLoading(true);
 
     const ticker = /^[0-9]{6}$/.test(userInput) ? `${userInput}.KS` : userInput;
-    const period = document.getElementById('period-select').value;
-    const interval = '1d';
+    
+    // ## 핵심 수정: 각 그룹에서 선택된 값을 가져옵니다.
+    let period = periodGroup.querySelector('input:checked').value;
+    const interval = intervalGroup.querySelector('input:checked').value;
+
+    // ## 핵심 수정: yfinance API 제약조건에 맞춰 기간(period)을 자동으로 보정합니다.
+    if (interval === '5m' && ['1y', 'max'].includes(period)) {
+        period = '1mo'; // 5분봉은 최대 60일이지만, 여유있게 1달로 보정
+        document.getElementById('p-1mo').checked = true;
+    } else if (interval === '1h' && period === 'max') {
+        period = '1y'; // 1시간봉은 최대 730일이지만, 1년으로 보정
+        document.getElementById('p-1y').checked = true;
+    }
+    
     const chartApiUrl = `/api/stock?ticker=${ticker}&range=${period}&interval=${interval}`;
     const infoApiUrl = `/api/stock/info?ticker=${ticker}`;
 
@@ -280,9 +234,17 @@ async function handleAnalysis() {
         const [chartRes, infoRes] = await Promise.all([fetch(chartApiUrl), fetch(infoApiUrl)]);
         const chartData = await chartRes.json();
         const infoData = await infoRes.json();
+
         if (chartData.error || infoData.error) {
-            throw new Error(chartData.error?.details || infoData.error?.details || '데이터를 가져오지 못했습니다.');
+            let errorMessage = chartData.error || infoData.error || '데이터를 가져오지 못했습니다.';
+            if (typeof errorMessage === 'object') errorMessage = JSON.stringify(errorMessage);
+            
+            if (errorMessage.includes("data is only available for last")) {
+                 errorMessage = "선택하신 기간에 대한 단기 데이터를 조회할 수 없습니다. 기간을 줄여 다시 시도해주세요.";
+            }
+            throw new Error(errorMessage);
         }
+
         currentChartData = chartData;
         updateChart();
         renderTechnicalAnalysisCard(chartData);

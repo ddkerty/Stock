@@ -6,10 +6,16 @@ import pandas as pd
 import yfinance as yf
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
+from flask_caching import Cache
 
 # --- Flask 앱 설정 ---
 app = Flask(__name__, static_folder='.', static_url_path='')
 CORS(app)
+# 캐시 설정: SimpleCache (운영 환경에서는 Redis 등 권장)
+cache = Cache(app, config={
+    'CACHE_TYPE': 'SimpleCache',
+    'CACHE_DEFAULT_TIMEOUT': 3600  # 1시간
+})
 logging.basicConfig(level=logging.INFO)
 
 # --- 웹 페이지 및 정적 파일 라우팅 ---
@@ -49,6 +55,7 @@ def calculate_vwap(high, low, close, volume):
 
 # --- API 1: 차트 데이터 (기술적 분석) ---
 @app.route('/api/stock')
+@cache.memoize()
 def get_stock_data():
     ticker = request.args.get('ticker')
     data_range = request.args.get('range', '1y')
@@ -86,6 +93,7 @@ def get_stock_data():
 # --- API 2: 기업 정보 (펀더멘탈 스탯) 및 계산 모델 ---
 # (이전과 동일한 코드, 변경 없음)
 @app.route('/api/stock/info')
+@cache.memoize()
 def get_stock_info():
     ticker = request.args.get('ticker')
     if not ticker: return jsonify({"error": "Ticker is required"}), 400

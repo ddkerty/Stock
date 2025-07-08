@@ -4,3 +4,4 @@ requests
 yfinance
 numpy
 pandas
+Flask-Caching

@@ -90,12 +90,16 @@ function renderTechnicalAnalysisCard(data) {
             }
 
             if (nearestLevel.distance / diff < 0.02) { // 2% 이내 근접 시
-                let text = '';
-                if (nearestLevel.ratio === 0) text = `고점($${nearestLevel.price.toFixed(2)}) 부근, 차익 실현 압력 주의`;
-                else if (nearestLevel.ratio === 1) text = `저점($${nearestLevel.price.toFixed(2)}) 부근, 지지 테스트 중`;
-                else text = `피보나치 ${nearestLevel.ratio.toFixed(3)} 레벨($${nearestLevel.price.toFixed(2)}) 근처`;
-                
-                signals.push({ type: 'neutral', text: `🔍 **피보나치:** ${text}`, score: 0 });
+                const comments = {
+                    0.236: "얕은 되돌림 후 강세 재개 가능성",
+                    0.382: "첫 번째 핵심 지지선",
+                    0.5:   "추세가 중립으로 전환되는 분기점",
+                    0.618: "되돌림의 마지막 보루로 평가",
+                    1.0:   "저점 지지 테스트 중",
+                    0.0:   "고점 부근, 차익 실현 압력 주의",
+                };
+                const text = comments[nearestLevel.ratio] || `피보나치 ${nearestLevel.ratio.toFixed(3)} 레벨 근처`;
+                signals.push({ type: 'neutral', text: `🔍 **피보나치:** ${text} ($${nearestLevel.price.toFixed(2)})`, score: 0 });
             }
         }
     }
@@ -189,7 +193,9 @@ function renderTechnicalAnalysisCard(data) {
                     case 'negative': colorClass = 'text-danger'; break;
                     default: colorClass = 'text-muted'; break;
                 }
-                return `<li class="list-group-item ${colorClass} small py-2">${signal.text}</li>`;
+                // 마크다운(**)을 HTML <strong> 태그로 변환
+                const formattedText = signal.text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+                return `<li class="list-group-item ${colorClass} small py-2">${formattedText}</li>`;
             }).join('');
     }
 

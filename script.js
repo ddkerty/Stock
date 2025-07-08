@@ -57,6 +57,11 @@ function renderStockInfo(info) {
     stockInfoCard.classList.remove('d-none');
 }
 
+/**
+ * ## 여기가 완전히 새로워진 최종 분석 엔진입니다! ##
+ * 어떤 상황에서도 5개의 모든 기술 지표 상태를 표시하도록 수정되었습니다.
+ * @param {object} data - 서버로부터 받은 차트 및 지표 데이터
+ */
 function renderTechnicalAnalysisCard(data) {
     const signals = [];
     let summaryScore = 0;
@@ -64,97 +69,115 @@ function renderTechnicalAnalysisCard(data) {
     const lastN = (arr, n) => (arr ? arr.filter(v => v !== null).slice(-n) : []);
     const [prevClose, latestClose] = lastN(data.ohlc.close, 2);
     
+    // --- 1. 피보나치 되돌림 분석 ---
     const validHighs = data.ohlc.high.filter(v => v !== null);
     const validLows = data.ohlc.low.filter(v => v !== null);
     if (validHighs.length > 1 && validLows.length > 1 && latestClose !== undefined) {
         const high = Math.max(...validHighs);
         const low = Math.min(...validLows);
         const diff = high - low;
-
+        let fibSignalFound = false;
         if (diff > 1e-9) {
             const levels = {
                 0.0: high, 0.236: high - 0.236 * diff, 0.382: high - 0.382 * diff,
                 0.5: high - 0.5 * diff, 0.618: high - 0.618 * diff, 1.0: low,
             };
-            let nearestLevel = { ratio: null, price: null, distance: Infinity };
             for (const [ratio, lvl_price] of Object.entries(levels)) {
-                const distance = Math.abs(latestClose - lvl_price);
-                if (distance < nearestLevel.distance) {
-                    nearestLevel = { ratio: Number(ratio), price: lvl_price, distance: distance };
+                if (Math.abs(latestClose - lvl_price) / diff < 0.02) {
+                    const comments = { 0.236: "얕은 되돌림 후 강세 재개 가능성", 0.382: "첫 번째 핵심 지지선", 0.5: "추세 중립 전환 분기점", 0.618: "되돌림의 마지막 보루", 1.0: "저점 지지 테스트 중", 0.0: "고점 부근, 차익 실현 압력 주의" };
+                    const text = comments[ratio] || `피보나치 ${Number(ratio).toFixed(3)} 레벨 근처`;
+                    signals.push({ type: 'neutral', text: `🔍 **피보나치:** ${text} ($${lvl_price.toFixed(2)})`, score: 0 });
+                    fibSignalFound = true;
+                    break;
                 }
             }
-            if (nearestLevel.distance / diff < 0.02) {
-                const comments = {
-                    0.236: "얕은 되돌림 후 강세 재개 가능성", 0.382: "첫 번째 핵심 지지선",
-                    0.5: "추세가 중립으로 전환되는 분기점", 0.618: "되돌림의 마지막 보루로 평가",
-                    1.0: "저점 지지 테스트 중", 0.0: "고점 부근, 차익 실현 압력 주의",
-                };
-                const text = comments[nearestLevel.ratio] || `피보나치 ${nearestLevel.ratio.toFixed(3)} 레벨 근처`;
-                signals.push({ type: 'neutral', text: `🔍 **피보나치:** ${text} ($${nearestLevel.price.toFixed(2)})`, score: 0 });
-            }
         }
+        if (!fibSignalFound) {
+            signals.push({ type: 'neutral', text: `🔍 **피보나치:** 주요 레벨과 이격 상태`, score: 0 });
+        }
+    } else {
+        signals.push({ type: 'neutral', text: `🔍 **피보나치:** 분석 데이터 부족`, score: 0 });
     }
 
+    // --- 2. VWAP 분석 ---
     const latestVwap = lastN(data.vwap, 1)[0];
     if (latestClose !== undefined && latestVwap !== undefined) {
         if (latestClose > latestVwap) {
-            signals.push({ type: 'positive', text: '📈 **VWAP:** 현재가 위, 단기 매수세 우위', score: 0.5 });
+            signals.push({ type: 'positive', text: '📈 **VWAP:** 현재가 위 (단기 매수세 우위)', score: 0.5 });
         } else {
-            signals.push({ type: 'negative', text: '📉 **VWAP:** 현재가 아래, 단기 매도세 우위', score: -0.5 });
+            signals.push({ type: 'negative', text: '📉 **VWAP:** 현재가 아래 (단기 매도세 우위)', score: -0.5 });
         }
+    } else {
+        signals.push({ type: 'neutral', text: '↔️ **VWAP:** 신호 없음', score: 0 });
     }
 
+    // --- 3. 볼린저 밴드 분석 ---
     const latestUpper = lastN(data.bbands.upper, 1)[0];
     const latestLower = lastN(data.bbands.lower, 1)[0];
     if (latestClose !== undefined && latestUpper !== undefined && latestLower !== undefined) {
-        const bandWidth = latestUpper - latestLower;
         if (latestClose > latestUpper) {
-            signals.push({ type: 'positive', text: '🚨 **볼린저밴드:** 상단 돌파 (강세 추세)', score: 1.5 });
+            signals.push({ type: 'positive', text: '🚨 **볼린저밴드:** 상단 돌파 (강세 신호)', score: 1.5 });
         } else if (latestClose < latestLower) {
-            signals.push({ type: 'negative', text: '📉 **볼린저밴드:** 하단 이탈 (약세 추세)', score: -1.5 });
-        } else if (bandWidth > 0) {
-            const positionRatio = (latestClose - latestLower) / bandWidth;
-            if (positionRatio > 0.75) signals.push({ type: 'neutral', text: '🟢 **볼린저밴드:** 밴드 상단 근접', score: 0 });
-            else if (positionRatio < 0.25) signals.push({ type: 'neutral', text: '🔴 **볼린저밴드:** 밴드 하단 근접', score: 0 });
+            signals.push({ type: 'negative', text: '📉 **볼린저밴드:** 하단 이탈 (약세 신호)', score: -1.5 });
+        } else {
+            signals.push({ type: 'neutral', text: '↔️ **볼린저밴드:** 밴드 내 위치 (신호 없음)', score: 0 });
         }
+    } else {
+        signals.push({ type: 'neutral', text: '↔️ **볼린저밴드:** 신호 없음', score: 0 });
     }
 
-    const [prevRsi, latestRsi] = lastN(data.rsi, 2);
+    // --- 4. RSI 분석 ---
+    const latestRsi = lastN(data.rsi, 1)[0];
     if (latestRsi !== undefined) {
-        if (latestRsi > 70) signals.push({ type: 'negative', text: `📈 **RSI (${latestRsi.toFixed(1)}):** 과매수 영역`, score: -1 });
-        else if (latestRsi < 30) signals.push({ type: 'positive', text: `📉 **RSI (${latestRsi.toFixed(1)}):** 과매도 영역`, score: 1 });
-        else if (latestRsi > 50) signals.push({ type: 'neutral', text: `🟢 **RSI (${latestRsi.toFixed(1)}):** 50 이상, 상승 추세 우위`, score: 0 });
-        else signals.push({ type: 'neutral', text: `🔴 **RSI (${latestRsi.toFixed(1)}):** 50 이하, 하락 추세 우위`, score: 0 });
+        if (latestRsi > 70) {
+            signals.push({ type: 'negative', text: `📈 **RSI (${latestRsi.toFixed(1)}):** 과매수 영역`, score: -1 });
+        } else if (latestRsi < 30) {
+            signals.push({ type: 'positive', text: `📉 **RSI (${latestRsi.toFixed(1)}):** 과매도 영역`, score: 1 });
+        } else {
+            signals.push({ type: 'neutral', text: `↔️ **RSI (${latestRsi.toFixed(1)}):** 중립 구간 (신호 없음)`, score: 0 });
+        }
+    } else {
+        signals.push({ type: 'neutral', text: '↔️ **RSI:** 신호 없음', score: 0 });
     }
 
+    // --- 5. MACD 분석 ---
     const [prevMacd, latestMacd] = lastN(data.macd.line, 2);
     const [prevSignal, latestSignal] = lastN(data.macd.signal, 2);
      if (latestMacd !== undefined && prevMacd !== undefined && latestSignal !== undefined && prevSignal !== undefined) {
         const wasAbove = prevMacd > prevSignal;
         const isAbove = latestMacd > latestSignal;
-        if (isAbove && !wasAbove) signals.push({ type: 'positive', text: '🟢 **MACD:** 골든 크로스 발생!', score: 2 });
-        else if (!isAbove && wasAbove) signals.push({ type: 'negative', text: '🔴 **MACD:** 데드 크로스 발생!', score: -2 });
-        else if (isAbove) signals.push({ type: 'neutral', text: '↔️ **MACD:** 상승 추세 유지 중', score: 0 });
-        else signals.push({ type: 'neutral', text: '↔️ **MACD:** 하락 추세 유지 중', score: 0 });
+        if (isAbove && !wasAbove) {
+            signals.push({ type: 'positive', text: '🟢 **MACD:** 골든 크로스 발생!', score: 2 });
+        } else if (!isAbove && wasAbove) {
+            signals.push({ type: 'negative', text: '🔴 **MACD:** 데드 크로스 발생!', score: -2 });
+        } else {
+            signals.push({ type: 'neutral', text: `↔️ **MACD:** 교차 신호 없음 (${isAbove ? '상승' : '하락'} 추세 유지)`, score: 0 });
+        }
+    } else {
+        signals.push({ type: 'neutral', text: '↔️ **MACD:** 신호 없음', score: 0 });
     }
     
+    // --- 6. 종합 의견 생성 ---
     summaryScore = signals.reduce((acc, signal) => acc + signal.score, 0);
     let summary;
-    if (signals.length === 0) summary = { text: '분석 불가', detail: '기술적 신호를 계산하기에 데이터가 부족합니다.', type: 'neutral' };
+    if (signals.length < 5) summary = { text: '분석 불가', detail: '기술적 신호를 계산하기에 데이터가 부족합니다.', type: 'neutral' };
     else if (summaryScore >= 3) summary = { text: '강력 매수 고려', detail: '다수의 강력한 긍정 신호가 포착되었습니다.', type: 'positive' };
     else if (summaryScore >= 1) summary = { text: '매수 우위', detail: '긍정적인 신호가 우세합니다.', type: 'positive' };
     else if (summaryScore > -1) summary = { text: '중립 / 혼조세', detail: '신호가 엇갈리거나 뚜렷한 방향성이 없습니다.', type: 'neutral' };
     else if (summaryScore > -3) summary = { text: '매도 우위', detail: '부정적인 신호가 우세합니다.', type: 'negative' };
     else summary = { text: '강력 매도 고려', detail: '다수의 강력한 부정 신호가 포착되었습니다.', type: 'negative' };
 
-    let signalHtml = `<li class="list-group-item text-center text-muted small">감지된 기술적 신호가 없습니다.</li>`;
-    if (signals.length > 0) {
-        signalHtml = signals.sort((a, b) => Math.abs(b.score) - Math.abs(a.score)).map(signal => {
-            let colorClass = signal.type === 'positive' ? 'text-success' : (signal.type === 'negative' ? 'text-danger' : 'text-muted');
-            const formattedText = signal.text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-            return `<li class="list-group-item ${colorClass} small py-2">${formattedText}</li>`;
-        }).join('');
-    }
+    // --- 7. HTML 렌더링 ---
+    const signalHtml = signals.map(signal => {
+        let colorClass;
+        switch (signal.type) {
+            case 'positive': colorClass = 'text-success'; break;
+            case 'negative': colorClass = 'text-danger'; break;
+            default: colorClass = 'text-muted'; break;
+        }
+        const formattedText = signal.text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        return `<li class="list-group-item ${colorClass} small py-2">${formattedText}</li>`;
+    }).join('');
 
     const summaryColorClasses = { positive: 'bg-success-subtle text-success-emphasis', negative: 'bg-danger-subtle text-danger-emphasis', neutral: 'bg-secondary-subtle text-secondary-emphasis' };
     technicalAnalysisContainer.innerHTML = `
@@ -214,11 +237,9 @@ async function handleAnalysis() {
 
     const ticker = /^[0-9]{6}$/.test(userInput) ? `${userInput}.KS` : userInput;
     
-    // ## 핵심 수정: 각 드롭다운에서 선택된 값을 가져옵니다.
     const period = periodSelect.value;
     const interval = intervalSelect.value;
 
-    // ## 핵심 수정: yfinance API 제약조건 유효성 검사
     const periodInDays = { '1d': 1, '5d': 5, '1mo': 30, '1y': 365, 'max': Infinity };
     const selectedPeriodDays = periodInDays[period];
     let errorMessage = '';
@@ -234,7 +255,7 @@ async function handleAnalysis() {
         technicalAnalysisContainer.innerHTML = `<div class="alert alert-danger small p-2 m-0">${errorMessage}</div>`;
         if (chart) chart.destroy();
         showLoading(false);
-        return; // 유효하지 않은 조합이면 분석 중단
+        return;
     }
     
     const chartApiUrl = `/api/stock?ticker=${ticker}&range=${period}&interval=${interval}`;
@@ -246,7 +267,7 @@ async function handleAnalysis() {
         const infoData = await infoRes.json();
 
         if (chartData.error || infoData.error) {
-            throw new Error(chartData.error || infoData.error || '데이터를 가져오지 못했습니다.');
+            throw new Error(chartData.error?.details || infoData.error?.details || '데이터를 가져오지 못했습니다.');
         }
 
         currentChartData = chartData;

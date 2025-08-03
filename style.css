@@ -94,10 +94,102 @@ body {
     min-height: 400px;
 }
 
+/* 모바일 반응형 최적화 */
 @media (max-width: 768px) {
     #chart-container {
         height: 40vh;
         min-height: 300px;
+    }
+    
+    /* 모바일에서 카드 패딩 조정 */
+    .card-body {
+        padding: 0.75rem !important;
+    }
+    
+    /* 버튼 그룹 모바일 최적화 */
+    .btn-group-vertical-mobile {
+        flex-direction: column;
+    }
+    
+    .btn-group-vertical-mobile .btn {
+        margin-bottom: 0.5rem;
+        border-radius: 0.375rem !important;
+    }
+    
+    /* 테이블 스크롤 */
+    .table-responsive-mobile {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    
+    /* 폰트 크기 조정 */
+    .card-title {
+        font-size: 1.1rem;
+    }
+    
+    .small-mobile {
+        font-size: 0.75rem;
+    }
+    
+    /* 차트 컨트롤 모바일 최적화 */
+    #indicator-controls {
+        flex-direction: column;
+        gap: 0.5rem !important;
+    }
+    
+    #indicator-controls .form-check {
+        margin-bottom: 0.25rem;
+    }
+}
+
+@media (max-width: 576px) {
+    /* Extra small devices */
+    #chart-container {
+        height: 35vh;
+        min-height: 250px;
+    }
+    
+    .container {
+        padding-left: 0.5rem;
+        padding-right: 0.5rem;
+    }
+    
+    .card {
+        margin-bottom: 1rem;
+    }
+    
+    /* 검색 입력 필드 */
+    #ticker {
+        font-size: 16px; /* iOS 확대 방지 */
+    }
+    
+    /* 버튼 크기 조정 */
+    .btn-lg {
+        padding: 0.5rem 1rem;
+        font-size: 1rem;
+    }
+    
+    /* 기술 지표 목록 */
+    .list-group-item {
+        padding: 0.5rem;
+        font-size: 0.875rem;
+    }
+}
+
+/* 터치 디바이스 최적화 */
+@media (hover: none) and (pointer: coarse) {
+    /* 터치 타겟 크기 증가 */
+    .btn, .form-check-input, .autocomplete-item {
+        min-height: 44px; /* Apple 권장 최소 터치 타겟 크기 */
+    }
+    
+    /* 호버 효과 비활성화 */
+    .autocomplete-item:hover {
+        background-color: inherit;
+    }
+    
+    .autocomplete-item:active {
+        background-color: #e9ecef;
     }
 }
 

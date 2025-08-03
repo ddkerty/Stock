@@ -240,19 +240,40 @@ async function handleAnalysis() {
     const period = periodSelect.value;
     const interval = intervalSelect.value;
 
-    const periodInDays = { '1d': 1, '5d': 5, '1mo': 30, '1y': 365, 'max': Infinity };
-    const selectedPeriodDays = periodInDays[period];
-    let errorMessage = '';
+    // yfinance 제한사항에 맞는 기간-간격 조합 검증
+    const periodIntervalLimits = {
+        '1m': ['1d', '5d', '1mo'],
+        '5m': ['1d', '5d', '1mo'],
+        '1h': ['1d', '5d', '1mo', '3mo'],
+        '1d': ['1d', '5d', '1mo', '3mo', '1y', 'max'],
+        '1wk': ['1mo', '3mo', '1y', 'max']
+    };
 
-    if (['1m', '5m'].includes(interval) && selectedPeriodDays > 60) {
-        errorMessage = `분봉 데이터는 최근 60일까지만 조회가 가능합니다. 기간을 '1개월' 이하로 선택해주세요.`;
-    } else if (interval === '1h' && selectedPeriodDays > 730) {
-        errorMessage = `시간봉 데이터는 최근 2년까지만 조회가 가능합니다. 기간을 '1년' 이하로 선택해주세요.`;
+    let errorMessage = '';
+    if (periodIntervalLimits[interval]) {
+        const allowedPeriods = periodIntervalLimits[interval];
+        if (!allowedPeriods.includes(period)) {
+            const intervalNames = {
+                '1m': '1분봉', '5m': '5분봉', '1h': '1시간봉', 
+                '1d': '일봉', '1wk': '주봉'
+            };
+            const periodNames = {
+                '1d': '1일', '5d': '1주', '1mo': '1개월', '3mo': '3개월',
+                '6mo': '6개월', '1y': '1년', '2y': '2년', '5y': '5년',
+                '10y': '10년', 'ytd': '올해', 'max': '전체'
+            };
+            const allowedPeriodNames = allowedPeriods.map(p => periodNames[p] || p).join(', ');
+            errorMessage = `${intervalNames[interval] || interval}은 ${allowedPeriodNames} 기간에서만 사용 가능합니다.`;
+        }
     }
 
     if (errorMessage) {
         technicalAnalysisCard.classList.remove('d-none');
-        technicalAnalysisContainer.innerHTML = `<div class="alert alert-danger small p-2 m-0">${errorMessage}</div>`;
+        showUserFriendlyError({ 
+            message: '잘못된 기간-간격 조합', 
+            details: errorMessage,
+            code: 'INVALID_COMBINATION'
+        });
         if (chart) chart.destroy();
         showLoading(false);
         return;
@@ -278,7 +299,12 @@ async function handleAnalysis() {
         saveRecentSearch(ticker);
     } catch (error) {
         technicalAnalysisCard.classList.remove('d-none');
-        technicalAnalysisContainer.innerHTML = `<div class="alert alert-danger small p-2 m-0">${error.message}</div>`;
+        try {
+            const errorData = JSON.parse(error.message);
+            showUserFriendlyError(errorData);
+        } catch {
+            showUserFriendlyError({ message: error.message || '알 수 없는 오류가 발생했습니다' });
+        }
         if (chart) chart.destroy();
     } finally {
         showLoading(false);
@@ -339,23 +365,127 @@ function updateChart() {
 
 // --- 초기화 및 나머지 헬퍼 함수들 ---
 
+// --- 모바일 터치 지원 함수 ---
+function isTouchDevice() {
+    return 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+}
+
+function addTouchSupport() {
+    if (isTouchDevice()) {
+        // 터치 디바이스에서는 hover 클래스 제거
+        document.body.classList.add('touch-device');
+        
+        // iOS Safari에서 100vh 이슈 해결
+        const setVhProperty = () => {
+            const vh = window.innerHeight * 0.01;
+            document.documentElement.style.setProperty('--vh', `${vh}px`);
+        };
+        
+        setVhProperty();
+        window.addEventListener('resize', setVhProperty);
+        window.addEventListener('orientationchange', () => {
+            setTimeout(setVhProperty, 100);
+        });
+    }
+}
+
+// --- 키보드 지원 개선 ---
+function addKeyboardSupport() {
+    // Enter 키로 분석 실행
+    tickerInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            handleAnalysis();
+        }
+    });
+    
+    // ESC 키로 자동완성 닫기
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            autocompleteResults.style.display = 'none';
+        }
+    });
+}
+
+// --- 에러 표시 개선 ---
+function showUserFriendlyError(error, container = technicalAnalysisContainer) {
+    let errorMessage = '알 수 없는 오류가 발생했습니다.';
+    let errorDetail = '잠시 후 다시 시도해주세요.';
+    
+    if (error.code) {
+        switch (error.code) {
+            case 'TICKER_NOT_FOUND':
+                errorMessage = '종목을 찾을 수 없습니다';
+                errorDetail = '종목 심볼을 확인해주세요';
+                break;
+            case 'NO_DATA':
+                errorMessage = '데이터가 없습니다';
+                errorDetail = '다른 기간이나 간격을 선택해보세요';
+                break;
+            case 'CONNECTION_ERROR':
+                errorMessage = '네트워크 연결 오류';
+                errorDetail = '인터넷 연결을 확인해주세요';
+                break;
+            case 'INVALID_INPUT':
+                errorMessage = '잘못된 입력값';
+                errorDetail = error.details || '올바른 값을 입력해주세요';
+                break;
+        }
+    } else if (error.message) {
+        errorMessage = error.message;
+    }
+    
+    container.innerHTML = `
+        <div class="alert alert-danger small p-3 m-0">
+            <div class="d-flex align-items-center mb-2">
+                <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                <strong>${errorMessage}</strong>
+            </div>
+            <div class="text-muted">${errorDetail}</div>
+        </div>
+    `;
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
+    // 터치 및 키보드 지원 추가
+    addTouchSupport();
+    addKeyboardSupport();
+    
     applyTheme(localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+    
+    // 주식 목록 로드 (에러 처리 개선)
     try {
-        const [krxRes, nasdaqRes] = await Promise.all([fetch('krx_stock_list.csv'), fetch('nasdaq_stock_list.csv')]);
+        const [krxRes, nasdaqRes] = await Promise.all([
+            fetch('krx_stock_list.csv'),
+            fetch('nasdaq_stock_list.csv')
+        ]);
+        
+        if (!krxRes.ok || !nasdaqRes.ok) {
+            throw new Error('주식 목록을 불러올 수 없습니다');
+        }
+        
         const [krxText, nasdaqText] = await Promise.all([krxRes.text(), nasdaqRes.text()]);
         const krxData = Papa.parse(krxText, { header: true, skipEmptyLines: true }).data.map(s => ({ Symbol: s.Symbol, Name: s.Name }));
         const nasdaqData = Papa.parse(nasdaqText, { header: true, skipEmptyLines: true, transformHeader: h => h.trim().toLowerCase() === 'symbol' ? 'Symbol' : 'Name' }).data.map(s => ({ Symbol: s.Symbol, Name: s.Name }));
         stockList = [...krxData, ...nasdaqData].filter(s => s.Symbol && s.Name);
-    } catch (e) { console.error("Could not load stock lists:", e); }
+        
+        console.log(`${stockList.length}개 종목 로드 완료`);
+    } catch (e) { 
+        console.error("주식 목록 로드 실패:", e);
+        // 주식 목록 로드 실패시에도 앱은 계속 작동
+    }
     
     document.getElementById('analyze').addEventListener('click', handleAnalysis);
     chartTypeSwitch.addEventListener('change', () => { chartState.isCandlestick = chartTypeSwitch.checked; updateChart(); });
     darkModeSwitch.addEventListener('change', (e) => applyTheme(e.target.checked ? 'dark' : 'light'));
     
+    // 간격 변경시 기간 옵션 동적 업데이트
+    intervalSelect.addEventListener('change', updatePeriodOptions);
+    
     renderIndicatorControls();
     renderPopularStocks();
     renderRecentSearches();
+    updatePeriodOptions(); // 초기 기간 옵션 설정
     showLoading(false);
 });
 
@@ -439,6 +569,46 @@ function removeRecentSearch(ticker) {
     searches = searches.filter(item => item !== ticker);
     localStorage.setItem('recentSearches', JSON.stringify(searches));
     renderRecentSearches();
+}
+
+function updatePeriodOptions() {
+    const interval = intervalSelect.value;
+    const currentPeriod = periodSelect.value;
+    
+    // 간격별 허용되는 기간
+    const periodIntervalLimits = {
+        '1m': ['1d', '5d', '1mo'],
+        '5m': ['1d', '5d', '1mo'],
+        '1h': ['1d', '5d', '1mo', '3mo'],
+        '1d': ['1d', '5d', '1mo', '3mo', '1y', 'max'],
+        '1wk': ['1mo', '3mo', '1y', 'max']
+    };
+    
+    // 모든 기간 옵션
+    const allPeriods = [
+        { value: '1d', text: '1일' },
+        { value: '5d', text: '1주' },
+        { value: '1mo', text: '1개월' },
+        { value: '3mo', text: '3개월' },
+        { value: '1y', text: '1년' },
+        { value: 'max', text: '전체' }
+    ];
+    
+    // 현재 간격에 허용되는 기간만 필터링
+    const allowedPeriods = periodIntervalLimits[interval] || allPeriods.map(p => p.value);
+    const filteredPeriods = allPeriods.filter(p => allowedPeriods.includes(p.value));
+    
+    // 기간 선택 드롭다운 업데이트
+    periodSelect.innerHTML = '';
+    let newSelectedPeriod = allowedPeriods.includes(currentPeriod) ? currentPeriod : filteredPeriods[0]?.value || '1y';
+    
+    filteredPeriods.forEach(period => {
+        const option = document.createElement('option');
+        option.value = period.value;
+        option.textContent = period.text;
+        option.selected = period.value === newSelectedPeriod;
+        periodSelect.appendChild(option);
+    });
 }
 
 function applyTheme(theme) {

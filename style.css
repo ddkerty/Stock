@@ -103,7 +103,7 @@ body {
     
     /* 모바일에서 카드 패딩 조정 */
     .card-body {
-        padding: 0.75rem !important;
+        padding: 1rem !important;
     }
     
     /* 버튼 그룹 모바일 최적화 */
@@ -122,23 +122,68 @@ body {
         -webkit-overflow-scrolling: touch;
     }
     
-    /* 폰트 크기 조정 */
+    /* 개선된 타이포그래피 */
     .card-title {
-        font-size: 1.1rem;
+        font-size: 1.25rem;
+        font-weight: 700;
+        margin-bottom: 1.5rem;
     }
     
     .small-mobile {
+        font-size: 0.8rem;
+        line-height: 1.4;
+    }
+    
+    /* 리스크 지표 카드 모바일 최적화 */
+    .risk-metrics-mobile .col-4 {
+        margin-bottom: 1rem;
+    }
+    
+    .risk-metrics-mobile .fw-bold {
+        font-size: 1.1rem;
+    }
+    
+    .risk-metrics-mobile .small {
         font-size: 0.75rem;
+        font-weight: 500;
     }
     
     /* 차트 컨트롤 모바일 최적화 */
     #indicator-controls {
         flex-direction: column;
-        gap: 0.5rem !important;
+        gap: 0.75rem !important;
     }
     
     #indicator-controls .form-check {
-        margin-bottom: 0.25rem;
+        margin-bottom: 0.5rem;
+    }
+    
+    /* 기술적 분석 신호 목록 */
+    .list-group-item {
+        padding: 1rem 0.75rem;
+        line-height: 1.5;
+    }
+    
+    .list-group-item .fw-bold {
+        font-size: 0.95rem;
+    }
+    
+    /* 배지 크기 조정 */
+    .badge {
+        font-size: 0.7rem;
+        padding: 0.35em 0.6em;
+    }
+    
+    /* 종합 의견 섹션 */
+    .analysis-summary {
+        padding: 1.25rem !important;
+        border-radius: 0.5rem;
+        margin-bottom: 1rem;
+    }
+    
+    .analysis-summary h6 {
+        font-size: 1.1rem;
+        margin-bottom: 0.75rem;
     }
 }
 
@@ -183,6 +228,12 @@ body {
         min-height: 44px; /* Apple 권장 최소 터치 타겟 크기 */
     }
     
+    /* 터치 피드백 개선 */
+    .btn:active, .list-group-item:active, .card:active {
+        transform: scale(0.98);
+        transition: transform 0.1s ease;
+    }
+    
     /* 호버 효과 비활성화 */
     .autocomplete-item:hover {
         background-color: inherit;
@@ -190,7 +241,71 @@ body {
     
     .autocomplete-item:active {
         background-color: #e9ecef;
+        transform: scale(0.98);
     }
+    
+    /* 터치 스크롤 최적화 */
+    .touch-scroll {
+        -webkit-overflow-scrolling: touch;
+        scroll-behavior: smooth;
+    }
+    
+    /* 풀투리프레시 스타일 */
+    .pull-to-refresh {
+        height: 60px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #6c757d;
+        font-size: 0.9rem;
+        transition: all 0.3s ease;
+    }
+    
+    .pull-to-refresh.active {
+        color: #0d6efd;
+        font-weight: 600;
+    }
+}
+
+/* 모바일 제스처 인디케이터 */
+.swipe-indicator {
+    position: absolute;
+    top: 50%;
+    right: 10px;
+    transform: translateY(-50%);
+    color: #6c757d;
+    font-size: 0.8rem;
+    opacity: 0.7;
+    animation: swipe-hint 2s infinite;
+}
+
+@keyframes swipe-hint {
+    0%, 100% { transform: translateY(-50%) translateX(0); opacity: 0.7; }
+    50% { transform: translateY(-50%) translateX(-5px); opacity: 1; }
+}
+
+/* 터치 리플 효과 */
+.touch-ripple {
+    position: relative;
+    overflow: hidden;
+}
+
+.touch-ripple::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    border-radius: 50%;
+    background: rgba(13, 110, 253, 0.3);
+    transform: translate(-50%, -50%);
+    transition: width 0.3s, height 0.3s;
+}
+
+.touch-ripple:active::after {
+    width: 200px;
+    height: 200px;
 }
 
 /* Skeleton Loader Styles */
@@ -291,6 +406,140 @@ body {
 #dark-mode-label { color: #6c757d; }
 [data-bs-theme="dark"] #dark-mode-label { color: #ffc107; }
 
+
+/* 모바일 스티키 헤더 */
+@media (max-width: 768px) {
+    .mobile-sticky-header {
+        position: sticky;
+        top: 0;
+        z-index: 1030;
+        background: rgba(248, 249, 250, 0.95);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+        margin-bottom: 1rem;
+    }
+    
+    [data-bs-theme="dark"] .mobile-sticky-header {
+        background: rgba(33, 37, 41, 0.95);
+        border-bottom-color: rgba(255, 255, 255, 0.1);
+    }
+}
+
+/* Floating Action Button (FAB) */
+.fab {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: #0d6efd;
+    color: white;
+    border: none;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    z-index: 1040;
+    transition: all 0.3s ease;
+    transform: scale(0);
+}
+
+.fab.show {
+    transform: scale(1);
+}
+
+.fab:hover {
+    background: #0b5ed7;
+    transform: scale(1.1);
+}
+
+.fab:active {
+    transform: scale(0.95);
+}
+
+/* FAB 메뉴 */
+.fab-menu {
+    position: fixed;
+    bottom: 90px;
+    right: 20px;
+    z-index: 1035;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    opacity: 0;
+    transform: translateY(20px);
+    transition: all 0.3s ease;
+    pointer-events: none;
+}
+
+.fab-menu.show {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: all;
+}
+
+.fab-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: white;
+    padding: 10px 15px;
+    border-radius: 25px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    border: none;
+    color: #333;
+    font-size: 0.9rem;
+    white-space: nowrap;
+    transition: all 0.2s ease;
+}
+
+[data-bs-theme="dark"] .fab-menu-item {
+    background: #495057;
+    color: #dee2e6;
+}
+
+.fab-menu-item:hover {
+    transform: translateX(-5px);
+    background: #f8f9fa;
+}
+
+[data-bs-theme="dark"] .fab-menu-item:hover {
+    background: #6c757d;
+}
+
+/* 모바일 퀵 액션 바 */
+.mobile-quick-actions {
+    position: sticky;
+    bottom: 0;
+    background: white;
+    border-top: 1px solid #dee2e6;
+    padding: 10px;
+    margin-top: 2rem;
+    display: none;
+}
+
+[data-bs-theme="dark"] .mobile-quick-actions {
+    background: #212529;
+    border-top-color: #495057;
+}
+
+@media (max-width: 576px) {
+    .mobile-quick-actions {
+        display: flex;
+        justify-content: space-around;
+        align-items: center;
+        gap: 10px;
+    }
+    
+    .mobile-quick-actions .btn {
+        flex: 1;
+        padding: 8px 12px;
+        font-size: 0.8rem;
+    }
+}
 
 /* --- 기타 UI --- */
 body { transition: background-color 0.3s, color 0.3s; }

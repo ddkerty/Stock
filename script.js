@@ -1,6 +1,19 @@
 // script.js (Final Version - All Features Included)
 
 // --- 전역 변수 ---
+// 모바일 터치 인터랙션 변수
+let touchStartY = 0;
+let touchStartX = 0;
+let isPullingToRefresh = false;
+let swipeThreshold = 50;
+
+// 모바일 디바이스 감지
+const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || window.innerWidth <= 768;
+
+// 성능 최적화 변수
+let lazyLoadingEnabled = true;
+let chartDataCache = new Map();
+let cacheTimeout = 5 * 60 * 1000; // 5분 캐시
 let chart, statsRadarChart;
 let stockList = [];
 let currentChartData = {};
@@ -58,9 +71,9 @@ function renderStockInfo(info) {
 }
 
 /**
- * ## 여기가 완전히 새로워진 최종 분석 엔진입니다! ##
- * 어떤 상황에서도 5개의 모든 기술 지표 상태를 표시하도록 수정되었습니다.
- * @param {object} data - 서버로부터 받은 차트 및 지표 데이터
+ * ## 신뢰도 기반 분석 엔진 ##
+ * 각 지표의 신뢰도를 포함하여 분석 결과를 표시합니다.
+ * @param {object} data - 서버로부터 받은 차트 및 지표 데이터 (신뢰도 정보 포함)
  */
 function renderTechnicalAnalysisCard(data) {
     const signals = [];
@@ -68,6 +81,60 @@ function renderTechnicalAnalysisCard(data) {
 
     const lastN = (arr, n) => (arr ? arr.filter(v => v !== null).slice(-n) : []);
     const [prevClose, latestClose] = lastN(data.ohlc.close, 2);
+    
+    // 신뢰도 정보 추출
+    const confidences = data.confidence?.indicators || {};
+    const metrics = data.confidence?.metrics || {};
+    const warnings = data.confidence?.warnings || [];
+    
+    // 동적 분석 정보 추출
+    const dynamicThresholds = data.dynamic_analysis?.thresholds || {};
+    const isOptimized = data.dynamic_analysis?.is_optimized || false;
+    
+    // 백테스팅 결과 추출
+    const backtestResults = data.backtest?.results || {};
+    const hasBacktestData = Object.keys(backtestResults).length > 0;
+    
+    // 신뢰도 배지 생성 함수
+    function getConfidenceBadge(confidence) {
+        if (confidence >= 85) return '<span class="badge bg-success ms-2">신뢰도 ' + confidence + '%</span>';
+        if (confidence >= 70) return '<span class="badge bg-primary ms-2">신뢰도 ' + confidence + '%</span>';
+        if (confidence >= 50) return '<span class="badge bg-warning ms-2">신뢰도 ' + confidence + '%</span>';
+        return '<span class="badge bg-danger ms-2">신뢰도 ' + confidence + '%</span>';
+    }
+    
+    // 신뢰도 기반 점수 가중치 적용
+    function getWeightedScore(score, confidence) {
+        return score * (confidence / 100);
+    }
+    
+    // 백테스팅 배지 생성 함수
+    function getBacktestBadge(indicator) {
+        if (!hasBacktestData || !backtestResults[indicator]) return '';
+        
+        const result = backtestResults[indicator];
+        if (result.total_signals === 0) return '';
+        
+        const accuracy = result.accuracy || 0;
+        let badgeClass = 'bg-secondary';
+        let icon = '📊';
+        
+        if (accuracy >= 70) {
+            badgeClass = 'bg-success';
+            icon = '✅';
+        } else if (accuracy >= 55) {
+            badgeClass = 'bg-primary';
+            icon = '📈';
+        } else if (accuracy >= 40) {
+            badgeClass = 'bg-warning';
+            icon = '⚠️';
+        } else {
+            badgeClass = 'bg-danger';
+            icon = '❌';
+        }
+        
+        return `<span class="badge ${badgeClass} ms-1" title="최근 30일 성과">${icon} 적중률 ${accuracy}%</span>`;
+    }
     
     // --- 1. 피보나치 되돌림 분석 ---
     const validHighs = data.ohlc.high.filter(v => v !== null);
@@ -101,57 +168,148 @@ function renderTechnicalAnalysisCard(data) {
 
     // --- 2. VWAP 분석 ---
     const latestVwap = lastN(data.vwap, 1)[0];
+    const vwapConfidence = confidences.vwap || 75;
     if (latestClose !== undefined && latestVwap !== undefined) {
+        const baseScore = latestClose > latestVwap ? 0.5 : -0.5;
+        const weightedScore = getWeightedScore(baseScore, vwapConfidence);
+        const confidenceBadge = getConfidenceBadge(vwapConfidence);
+        
+        const backtestBadge = getBacktestBadge('vwap');
+        
         if (latestClose > latestVwap) {
-            signals.push({ type: 'positive', text: '📈 **VWAP:** 현재가 위 (단기 매수세 우위)', score: 0.5 });
+            signals.push({ 
+                type: 'positive', 
+                text: `📈 **VWAP:** 현재가 위 (단기 매수세 우위)${confidenceBadge}${backtestBadge}`, 
+                score: weightedScore 
+            });
         } else {
-            signals.push({ type: 'negative', text: '📉 **VWAP:** 현재가 아래 (단기 매도세 우위)', score: -0.5 });
+            signals.push({ 
+                type: 'negative', 
+                text: `📉 **VWAP:** 현재가 아래 (단기 매도세 우위)${confidenceBadge}${backtestBadge}`, 
+                score: weightedScore 
+            });
         }
     } else {
         signals.push({ type: 'neutral', text: '↔️ **VWAP:** 신호 없음', score: 0 });
     }
 
-    // --- 3. 볼린저 밴드 분석 ---
+    // --- 3. 볼린저 밴드 분석 (동적 파라미터 적용) ---
     const latestUpper = lastN(data.bbands.upper, 1)[0];
     const latestLower = lastN(data.bbands.lower, 1)[0];
+    const bollingerConfidence = confidences.bollinger || 75;
+    const bollingerExplanation = dynamicThresholds.bollinger?.explanation || '';
+    
     if (latestClose !== undefined && latestUpper !== undefined && latestLower !== undefined) {
+        const confidenceBadge = getConfidenceBadge(bollingerConfidence);
+        const optimizedBadge = isOptimized ? '<span class="badge bg-info ms-1">최적화</span>' : '';
+        const backtestBadge = getBacktestBadge('bollinger');
+        
         if (latestClose > latestUpper) {
-            signals.push({ type: 'positive', text: '🚨 **볼린저밴드:** 상단 돌파 (강세 신호)', score: 1.5 });
+            const weightedScore = getWeightedScore(1.5, bollingerConfidence);
+            signals.push({ 
+                type: 'positive', 
+                text: `🚨 **볼린저밴드:** 상단 돌파 (강세 신호)${confidenceBadge}${optimizedBadge}${backtestBadge}`, 
+                score: weightedScore,
+                explanation: bollingerExplanation
+            });
         } else if (latestClose < latestLower) {
-            signals.push({ type: 'negative', text: '📉 **볼린저밴드:** 하단 이탈 (약세 신호)', score: -1.5 });
+            const weightedScore = getWeightedScore(-1.5, bollingerConfidence);
+            signals.push({ 
+                type: 'negative', 
+                text: `📉 **볼린저밴드:** 하단 이탈 (약세 신호)${confidenceBadge}${optimizedBadge}${backtestBadge}`, 
+                score: weightedScore,
+                explanation: bollingerExplanation
+            });
         } else {
-            signals.push({ type: 'neutral', text: '↔️ **볼린저밴드:** 밴드 내 위치 (신호 없음)', score: 0 });
+            signals.push({ 
+                type: 'neutral', 
+                text: `↔️ **볼린저밴드:** 밴드 내 위치${confidenceBadge}${optimizedBadge}${backtestBadge}`, 
+                score: 0,
+                explanation: bollingerExplanation
+            });
         }
     } else {
         signals.push({ type: 'neutral', text: '↔️ **볼린저밴드:** 신호 없음', score: 0 });
     }
 
-    // --- 4. RSI 분석 ---
+    // --- 4. RSI 분석 (동적 임계값 적용) ---
     const latestRsi = lastN(data.rsi, 1)[0];
+    const rsiConfidence = confidences.rsi || 75;
+    
+    // 동적 임계값 적용
+    const rsiUpperThreshold = dynamicThresholds.rsi?.upper_threshold || 70;
+    const rsiLowerThreshold = dynamicThresholds.rsi?.lower_threshold || 30;
+    const rsiExplanation = dynamicThresholds.rsi?.explanation || '';
+    
     if (latestRsi !== undefined) {
-        if (latestRsi > 70) {
-            signals.push({ type: 'negative', text: `📈 **RSI (${latestRsi.toFixed(1)}):** 과매수 영역`, score: -1 });
-        } else if (latestRsi < 30) {
-            signals.push({ type: 'positive', text: `📉 **RSI (${latestRsi.toFixed(1)}):** 과매도 영역`, score: 1 });
+        const confidenceBadge = getConfidenceBadge(rsiConfidence);
+        const optimizedBadge = isOptimized ? '<span class="badge bg-info ms-1">최적화</span>' : '';
+        const backtestBadge = getBacktestBadge('rsi');
+        
+        if (latestRsi > rsiUpperThreshold) {
+            const weightedScore = getWeightedScore(-1, rsiConfidence);
+            signals.push({ 
+                type: 'negative', 
+                text: `📈 **RSI (${latestRsi.toFixed(1)}):** 과매수 영역 (${rsiUpperThreshold.toFixed(1)} 초과)${confidenceBadge}${optimizedBadge}${backtestBadge}`, 
+                score: weightedScore,
+                explanation: rsiExplanation
+            });
+        } else if (latestRsi < rsiLowerThreshold) {
+            const weightedScore = getWeightedScore(1, rsiConfidence);
+            signals.push({ 
+                type: 'positive', 
+                text: `📉 **RSI (${latestRsi.toFixed(1)}):** 과매도 영역 (${rsiLowerThreshold.toFixed(1)} 미만)${confidenceBadge}${optimizedBadge}${backtestBadge}`, 
+                score: weightedScore,
+                explanation: rsiExplanation
+            });
         } else {
-            signals.push({ type: 'neutral', text: `↔️ **RSI (${latestRsi.toFixed(1)}):** 중립 구간 (신호 없음)`, score: 0 });
+            signals.push({ 
+                type: 'neutral', 
+                text: `↔️ **RSI (${latestRsi.toFixed(1)}):** 중립 구간 (${rsiLowerThreshold.toFixed(1)}-${rsiUpperThreshold.toFixed(1)})${confidenceBadge}${optimizedBadge}${backtestBadge}`, 
+                score: 0,
+                explanation: rsiExplanation
+            });
         }
     } else {
         signals.push({ type: 'neutral', text: '↔️ **RSI:** 신호 없음', score: 0 });
     }
 
-    // --- 5. MACD 분석 ---
+    // --- 5. MACD 분석 (동적 파라미터 적용) ---
     const [prevMacd, latestMacd] = lastN(data.macd.line, 2);
     const [prevSignal, latestSignal] = lastN(data.macd.signal, 2);
-     if (latestMacd !== undefined && prevMacd !== undefined && latestSignal !== undefined && prevSignal !== undefined) {
+    const macdConfidence = confidences.macd || 75;
+    const macdExplanation = dynamicThresholds.macd?.explanation || '';
+    
+    if (latestMacd !== undefined && prevMacd !== undefined && latestSignal !== undefined && prevSignal !== undefined) {
         const wasAbove = prevMacd > prevSignal;
         const isAbove = latestMacd > latestSignal;
+        const confidenceBadge = getConfidenceBadge(macdConfidence);
+        const optimizedBadge = isOptimized ? '<span class="badge bg-info ms-1">최적화</span>' : '';
+        const backtestBadge = getBacktestBadge('macd');
+        
         if (isAbove && !wasAbove) {
-            signals.push({ type: 'positive', text: '🟢 **MACD:** 골든 크로스 발생!', score: 2 });
+            const weightedScore = getWeightedScore(2, macdConfidence);
+            signals.push({ 
+                type: 'positive', 
+                text: `🟢 **MACD:** 골든 크로스 발생!${confidenceBadge}${optimizedBadge}${backtestBadge}`, 
+                score: weightedScore,
+                explanation: macdExplanation
+            });
         } else if (!isAbove && wasAbove) {
-            signals.push({ type: 'negative', text: '🔴 **MACD:** 데드 크로스 발생!', score: -2 });
+            const weightedScore = getWeightedScore(-2, macdConfidence);
+            signals.push({ 
+                type: 'negative', 
+                text: `🔴 **MACD:** 데드 크로스 발생!${confidenceBadge}${optimizedBadge}${backtestBadge}`, 
+                score: weightedScore,
+                explanation: macdExplanation
+            });
         } else {
-            signals.push({ type: 'neutral', text: `↔️ **MACD:** 교차 신호 없음 (${isAbove ? '상승' : '하락'} 추세 유지)`, score: 0 });
+            signals.push({ 
+                type: 'neutral', 
+                text: `↔️ **MACD:** 교차 신호 없음 (${isAbove ? '상승' : '하락'} 추세 유지)${confidenceBadge}${optimizedBadge}${backtestBadge}`, 
+                score: 0,
+                explanation: macdExplanation
+            });
         }
     } else {
         signals.push({ type: 'neutral', text: '↔️ **MACD:** 신호 없음', score: 0 });
@@ -179,13 +337,231 @@ function renderTechnicalAnalysisCard(data) {
         return `<li class="list-group-item ${colorClass} small py-2">${formattedText}</li>`;
     }).join('');
 
+    // --- 7. 경고 시스템 및 데이터 품질 정보 ---
+    let warningHtml = '';
+    if (warnings.length > 0) {
+        warningHtml = '<div class="p-2 border-top"><h6 class="mb-2 text-warning"><i class="bi bi-exclamation-triangle-fill"></i> 주의사항</h6>';
+        warnings.forEach(warning => {
+            const alertClass = warning.type === 'error' ? 'alert-danger' : 
+                             warning.type === 'warning' ? 'alert-warning' : 'alert-info';
+            warningHtml += `<div class="alert ${alertClass} py-1 px-2 small mb-1">${warning.icon} ${warning.message}</div>`;
+        });
+        warningHtml += '</div>';
+    }
+    
+    // 데이터 품질 정보
+    let dataQualityHtml = '';
+    if (metrics.data_quality_score !== undefined) {
+        const qualityColor = metrics.data_quality_score >= 95 ? 'success' : 
+                           metrics.data_quality_score >= 85 ? 'primary' : 
+                           metrics.data_quality_score >= 70 ? 'warning' : 'danger';
+        
+        dataQualityHtml = `
+            <div class="p-2 border-top bg-light">
+                <div class="row small text-muted">
+                    <div class="col-6">
+                        <i class="bi bi-database-fill"></i> 데이터품질: 
+                        <span class="badge bg-${qualityColor}">${metrics.data_quality_score}%</span>
+                    </div>
+                    <div class="col-6">
+                        <i class="bi bi-bar-chart-line-fill"></i> 거래량: 
+                        <span class="${metrics.volume_ratio > 1.5 ? 'text-success' : metrics.volume_ratio < 0.5 ? 'text-danger' : 'text-muted'}">
+                            ${metrics.volume_ratio ? (metrics.volume_ratio * 100).toFixed(0) + '%' : 'N/A'}
+                        </span>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    // 동적 분석 정보 HTML
+    let dynamicAnalysisHtml = '';
+    if (isOptimized && Object.keys(dynamicThresholds).length > 0) {
+        dynamicAnalysisHtml = `
+            <div class="p-2 border-top bg-info-subtle">
+                <h6 class="mb-2 text-info"><i class="bi bi-gear-fill"></i> 최적화된 분석</h6>
+                <div class="small text-muted">
+                    <div class="row">
+                        <div class="col-12 mb-1">
+                            <strong>이 종목에 특화된 분석 파라미터:</strong>
+                        </div>
+                    </div>
+                    <div class="accordion accordion-flush" id="dynamicAccordion">
+                        <div class="accordion-item bg-transparent border-0">
+                            <h6 class="accordion-header">
+                                <button class="accordion-button collapsed bg-transparent border-0 py-1 px-0 small" type="button" data-bs-toggle="collapse" data-bs-target="#collapseDetails">
+                                    <i class="bi bi-chevron-right me-1"></i> 상세 파라미터 보기
+                                </button>
+                            </h6>
+                            <div id="collapseDetails" class="accordion-collapse collapse" data-bs-parent="#dynamicAccordion">
+                                <div class="accordion-body px-0 py-1">
+                                    ${dynamicThresholds.rsi ? `<div>• RSI: ${dynamicThresholds.rsi.explanation}</div>` : ''}
+                                    ${dynamicThresholds.bollinger ? `<div>• 볼린저밴드: ${dynamicThresholds.bollinger.explanation}</div>` : ''}
+                                    ${dynamicThresholds.macd ? `<div>• MACD: ${dynamicThresholds.macd.explanation}</div>` : ''}
+                                    ${dynamicThresholds.vwap ? `<div>• VWAP: ${dynamicThresholds.vwap.explanation}</div>` : ''}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    // 종합 신뢰도 계산
+    const validConfidences = Object.values(confidences).filter(c => c > 0);
+    const averageConfidence = validConfidences.length > 0 ? 
+        Math.round(validConfidences.reduce((a, b) => a + b, 0) / validConfidences.length) : 75;
+    const overallConfidenceBadge = getConfidenceBadge(averageConfidence);
+
+    // 리스크 지표 HTML 생성 (모바일 최적화)
+    let riskMetricsHtml = '';
+    if (data.risk_metrics) {
+        const metrics = data.risk_metrics;
+        riskMetricsHtml = `
+        <div class="card mt-3">
+            <div class="card-header py-2">
+                <h6 class="mb-0 fw-bold">📊 리스크 지표</h6>
+                ${isMobile ? '<div class="swipe-indicator">← 스와이프 →</div>' : ''}
+            </div>
+            <div class="card-body py-2">
+                <div class="row text-center ${isMobile ? 'risk-metrics-mobile' : ''}">
+                    <div class="col-4">
+                        <div class="small text-muted">최대손실폭(MDD)</div>
+                        <div class="fw-bold ${metrics.mdd && metrics.mdd < -20 ? 'text-danger' : metrics.mdd && metrics.mdd < -10 ? 'text-warning' : 'text-success'}">
+                            ${metrics.mdd !== null ? metrics.mdd.toFixed(1) + '%' : 'N/A'}
+                        </div>
+                    </div>
+                    <div class="col-4">
+                        <div class="small text-muted">샤프비율</div>
+                        <div class="fw-bold ${metrics.sharpe_ratio && metrics.sharpe_ratio > 1 ? 'text-success' : metrics.sharpe_ratio && metrics.sharpe_ratio > 0 ? 'text-warning' : 'text-danger'}">
+                            ${metrics.sharpe_ratio !== null ? metrics.sharpe_ratio.toFixed(2) : 'N/A'}
+                        </div>
+                    </div>
+                    <div class="col-4">
+                        <div class="small text-muted">베타 (vs KOSPI)</div>
+                        <div class="fw-bold ${metrics.beta && Math.abs(metrics.beta - 1) < 0.2 ? 'text-success' : 'text-info'}">
+                            ${metrics.beta !== null ? metrics.beta.toFixed(2) : 'N/A'}
+                        </div>
+                    </div>
+                </div>
+                <div class="row text-center mt-2 ${isMobile ? 'risk-metrics-mobile' : ''}">
+                    <div class="col-4">
+                        <div class="small text-muted">변동성 (연율화)</div>
+                        <div class="fw-bold ${metrics.volatility && metrics.volatility > 30 ? 'text-danger' : metrics.volatility && metrics.volatility > 20 ? 'text-warning' : 'text-success'}">
+                            ${metrics.volatility !== null ? metrics.volatility.toFixed(1) + '%' : 'N/A'}
+                        </div>
+                    </div>
+                    <div class="col-4">
+                        <div class="small text-muted">승률</div>
+                        <div class="fw-bold ${metrics.win_rate && metrics.win_rate > 60 ? 'text-success' : metrics.win_rate && metrics.win_rate > 45 ? 'text-warning' : 'text-danger'}">
+                            ${metrics.win_rate !== null ? metrics.win_rate.toFixed(1) + '%' : 'N/A'}
+                        </div>
+                    </div>
+                    <div class="col-4">
+                        <div class="small text-muted">연간수익률</div>
+                        <div class="fw-bold ${metrics.annual_return && metrics.annual_return > 10 ? 'text-success' : metrics.annual_return && metrics.annual_return > 0 ? 'text-warning' : 'text-danger'}">
+                            ${metrics.annual_return !== null ? (metrics.annual_return > 0 ? '+' : '') + metrics.annual_return.toFixed(1) + '%' : 'N/A'}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>`;
+    }
+
+    // 다중 시간대 분석 HTML 생성
+    let multiTimeframeHtml = '';
+    if (data.multi_timeframe && data.multi_timeframe.timeframes && Object.keys(data.multi_timeframe.timeframes).length > 0) {
+        const mtf = data.multi_timeframe;
+        const consensusColors = {
+            'bullish': 'text-success',
+            'bearish': 'text-danger',
+            'mixed': 'text-warning',
+            'insufficient_data': 'text-muted',
+            'error': 'text-muted'
+        };
+        const consensusText = {
+            'bullish': '🔺 상승 컨센서스',
+            'bearish': '🔻 하락 컨센서스',
+            'mixed': '↔️ 혼재된 신호',
+            'insufficient_data': '❓ 데이터 부족',
+            'error': '⚠️ 분석 오류'
+        };
+        
+        let timeframeRows = '';
+        for (const [key, timeframe] of Object.entries(mtf.timeframes)) {
+            const signalEmojis = {
+                'bullish': '🟢',
+                'bearish': '🔴',
+                'neutral': '🟡'
+            };
+            const signalText = {
+                'bullish': '상승',
+                'bearish': '하락',
+                'neutral': '중립'
+            };
+            
+            timeframeRows += `
+                <tr>
+                    <td class="small">${timeframe.name}</td>
+                    <td class="text-center">
+                        ${signalEmojis[timeframe.overall] || '⚪'} 
+                        <span class="${consensusColors[timeframe.overall] || 'text-muted'}">${signalText[timeframe.overall] || '불명'}</span>
+                    </td>
+                    <td class="small text-muted">${timeframe.data_points}개 데이터</td>
+                </tr>
+            `;
+        }
+        
+        multiTimeframeHtml = `
+        <div class="card mt-3">
+            <div class="card-header py-2">
+                <h6 class="mb-0 fw-bold">⏱️ 다중 시간대 분석</h6>
+            </div>
+            <div class="card-body py-2">
+                <div class="row mb-2">
+                    <div class="col-8">
+                        <div class="fw-bold ${consensusColors[mtf.consensus] || 'text-muted'}">
+                            ${consensusText[mtf.consensus] || '분석 불가'}
+                        </div>
+                        <div class="small text-muted">
+                            ${mtf.total_timeframes}개 시간대 중 ${mtf.confidence}% 일치
+                        </div>
+                    </div>
+                    <div class="col-4 text-end">
+                        <span class="badge ${mtf.confidence >= 70 ? 'bg-success' : mtf.confidence >= 50 ? 'bg-warning' : 'bg-secondary'}">
+                            신뢰도 ${mtf.confidence}%
+                        </span>
+                    </div>
+                </div>
+                <table class="table table-sm mb-0">
+                    <thead>
+                        <tr class="table-light">
+                            <th class="small">시간대</th>
+                            <th class="text-center small">종합신호</th>
+                            <th class="small">데이터</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${timeframeRows}
+                    </tbody>
+                </table>
+            </div>
+        </div>`;
+    }
+
     const summaryColorClasses = { positive: 'bg-success-subtle text-success-emphasis', negative: 'bg-danger-subtle text-danger-emphasis', neutral: 'bg-secondary-subtle text-secondary-emphasis' };
     technicalAnalysisContainer.innerHTML = `
-        <div class="p-3 ${summaryColorClasses[summary.type]}">
-            <h6 class="mb-1 fw-bold">종합 의견: ${summary.text}</h6>
+        <div class="p-3 ${summaryColorClasses[summary.type]} ${isMobile ? 'analysis-summary' : ''}">
+            <h6 class="mb-1 fw-bold">종합 의견: ${summary.text} ${overallConfidenceBadge}</h6>
             <p class="mb-0 small">${summary.detail}</p>
         </div>
-        <ul class="list-group list-group-flush">${signalHtml}</ul>`;
+        <ul class="list-group list-group-flush">${signalHtml}</ul>
+        ${riskMetricsHtml}
+        ${multiTimeframeHtml}
+        ${warningHtml}
+        ${dataQualityHtml}
+        ${dynamicAnalysisHtml}`;
     technicalAnalysisCard.classList.remove('d-none');
 }
 
@@ -239,6 +615,24 @@ async function handleAnalysis() {
     
     const period = periodSelect.value;
     const interval = intervalSelect.value;
+    
+    // 캐시 확인
+    const cacheKey = getCacheKey(ticker, period, interval);
+    const cachedData = getCachedData(cacheKey);
+    
+    if (cachedData) {
+        // 캐시된 데이터 사용
+        const compressedData = compressChartData(cachedData.chartData);
+        currentChartData = compressedData;
+        updateChart();
+        renderTechnicalAnalysisCard(compressedData);
+        renderStockInfo(cachedData.infoData);
+        renderFundamentalStats(cachedData.infoData);
+        updateStickyHeader(ticker);
+        saveRecentSearch(ticker);
+        showLoading(false);
+        return;
+    }
 
     // yfinance 제한사항에 맞는 기간-간격 조합 검증
     const periodIntervalLimits = {
@@ -291,11 +685,22 @@ async function handleAnalysis() {
             throw new Error(chartData.error?.details || infoData.error?.details || '데이터를 가져오지 못했습니다.');
         }
 
-        currentChartData = chartData;
+        // 데이터 압축 및 캐시 저장
+        const compressedData = compressChartData(chartData);
+        setCachedData(cacheKey, {
+            chartData: chartData,
+            infoData: infoData
+        });
+        
+        currentChartData = compressedData;
         updateChart();
-        renderTechnicalAnalysisCard(chartData);
+        renderTechnicalAnalysisCard(compressedData);
         renderStockInfo(infoData);
         renderFundamentalStats(infoData);
+        
+        // 모바일 스티키 헤더 업데이트
+        updateStickyHeader(ticker);
+        
         saveRecentSearch(ticker);
     } catch (error) {
         technicalAnalysisCard.classList.remove('d-none');
@@ -446,7 +851,320 @@ function showUserFriendlyError(error, container = technicalAnalysisContainer) {
     `;
 }
 
+// --- 모바일 터치 제스처 핸들러 ---
+function initMobileTouchHandlers() {
+    if (!isMobile) return;
+    
+    // 풀투리프레시 구현
+    let pullToRefreshElement = null;
+    
+    document.addEventListener('touchstart', function(e) {
+        touchStartY = e.touches[0].clientY;
+        touchStartX = e.touches[0].clientX;
+        
+        // 맨 위에서 아래로 당길 때만 풀투리프레시 활성화
+        if (window.scrollY === 0) {
+            isPullingToRefresh = true;
+        }
+    });
+    
+    document.addEventListener('touchmove', function(e) {
+        if (!isPullingToRefresh) return;
+        
+        const touchY = e.touches[0].clientY;
+        const deltaY = touchY - touchStartY;
+        
+        if (deltaY > 60 && window.scrollY === 0) {
+            if (!pullToRefreshElement) {
+                pullToRefreshElement = document.createElement('div');
+                pullToRefreshElement.className = 'pull-to-refresh active';
+                pullToRefreshElement.innerHTML = '↓ 새로고침하려면 놓으세요';
+                document.body.insertBefore(pullToRefreshElement, document.body.firstChild);
+            }
+        } else if (pullToRefreshElement) {
+            pullToRefreshElement.remove();
+            pullToRefreshElement = null;
+        }
+    });
+    
+    document.addEventListener('touchend', function(e) {
+        if (pullToRefreshElement) {
+            // 현재 검색어로 새로고침
+            const ticker = tickerInput.value.trim();
+            if (ticker) {
+                handleAnalysis();
+            }
+            pullToRefreshElement.remove();
+            pullToRefreshElement = null;
+        }
+        isPullingToRefresh = false;
+    });
+    
+    // 카드 스와이프 제스처 (좌우 스와이프로 차트 타입 변경)
+    const chartContainer = document.getElementById('chart-container');
+    if (chartContainer) {
+        chartContainer.addEventListener('touchend', function(e) {
+            const touchEndX = e.changedTouches[0].clientX;
+            const deltaX = touchEndX - touchStartX;
+            
+            if (Math.abs(deltaX) > swipeThreshold) {
+                if (deltaX > 0) {
+                    // 오른쪽 스와이프 - 캔들차트로 전환
+                    if (!chartState.isCandlestick) {
+                        const candlestickToggle = document.getElementById('candlestick-toggle');
+                        if (candlestickToggle) {
+                            candlestickToggle.checked = true;
+                            toggleCandlestick();
+                        }
+                    }
+                } else {
+                    // 왼쪽 스와이프 - 라인차트로 전환
+                    if (chartState.isCandlestick) {
+                        const candlestickToggle = document.getElementById('candlestick-toggle');
+                        if (candlestickToggle) {
+                            candlestickToggle.checked = false;
+                            toggleCandlestick();
+                        }
+                    }
+                }
+            }
+        });
+    }
+}
+
+// 터치 피드백 효과 추가
+function addTouchRippleEffect() {
+    if (!isMobile) return;
+    
+    const buttons = document.querySelectorAll('.btn, .list-group-item');
+    buttons.forEach(button => {
+        button.classList.add('touch-ripple');
+    });
+}
+
+// 모바일 네비게이션 함수들
+let fabMenuOpen = false;
+
+function toggleFabMenu() {
+    const fabMenu = document.getElementById('fab-menu');
+    const fab = document.getElementById('fab');
+    
+    fabMenuOpen = !fabMenuOpen;
+    
+    if (fabMenuOpen) {
+        fabMenu.classList.add('show');
+        fab.innerHTML = '<i class="bi bi-x"></i>';
+    } else {
+        fabMenu.classList.remove('show');
+        fab.innerHTML = '<i class="bi bi-plus"></i>';
+    }
+}
+
+function scrollToTop() {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (fabMenuOpen) toggleFabMenu();
+}
+
+function scrollToAnalysis() {
+    const analysisElement = document.getElementById('technical-analysis-card');
+    if (analysisElement && !analysisElement.classList.contains('d-none')) {
+        analysisElement.scrollIntoView({ behavior: 'smooth' });
+    }
+}
+
+function refreshCurrentAnalysis() {
+    const ticker = tickerInput.value.trim();
+    if (ticker) {
+        handleAnalysis();
+    }
+    if (fabMenuOpen) toggleFabMenu();
+}
+
+function shareAnalysis() {
+    const ticker = tickerInput.value.trim();
+    if (ticker && navigator.share) {
+        navigator.share({
+            title: `Stock Insight - ${ticker} 분석`,
+            text: `${ticker} 주식 분석 결과를 보세요!`,
+            url: window.location.href
+        });
+    } else if (ticker) {
+        // 폴백: 클립보드에 복사
+        navigator.clipboard.writeText(window.location.href);
+        alert('링크가 클립보드에 복사되었습니다!');
+    }
+    if (fabMenuOpen) toggleFabMenu();
+}
+
+function togglePeriod() {
+    const periodSelect = document.getElementById('period-select');
+    const currentIndex = periodSelect.selectedIndex;
+    const nextIndex = (currentIndex + 1) % periodSelect.options.length;
+    periodSelect.selectedIndex = nextIndex;
+    
+    if (tickerInput.value.trim()) {
+        handleAnalysis();
+    }
+}
+
+function toggleChartType() {
+    const candlestickToggle = document.getElementById('candlestick-toggle');
+    if (candlestickToggle) {
+        candlestickToggle.checked = !candlestickToggle.checked;
+        toggleCandlestick();
+    }
+}
+
+// 스티키 헤더 표시/숨김
+function updateStickyHeader(ticker) {
+    if (!isMobile) return;
+    
+    const stickyHeader = document.getElementById('mobile-sticky-header');
+    const stickyTickerName = document.getElementById('sticky-ticker-name');
+    
+    if (ticker && stickyHeader && stickyTickerName) {
+        stickyTickerName.textContent = ticker;
+        stickyHeader.classList.remove('d-none');
+    }
+}
+
+// FAB 표시/숨김 (스크롤 기반)
+function updateFabVisibility() {
+    if (!isMobile) return;
+    
+    const fab = document.getElementById('fab');
+    const scrollY = window.scrollY;
+    
+    if (scrollY > 300) {
+        fab?.classList.add('show');
+        fab?.classList.remove('d-none');
+    } else {
+        fab?.classList.remove('show');
+        if (!fabMenuOpen) {
+            setTimeout(() => fab?.classList.add('d-none'), 300);
+        }
+    }
+}
+
+// 성능 최적화 함수들
+function getCacheKey(ticker, period, interval) {
+    return `${ticker}_${period}_${interval}`;
+}
+
+function getCachedData(cacheKey) {
+    const cached = chartDataCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < cacheTimeout) {
+        return cached.data;
+    }
+    return null;
+}
+
+function setCachedData(cacheKey, data) {
+    chartDataCache.set(cacheKey, {
+        data: data,
+        timestamp: Date.now()
+    });
+    
+    // 캐시 크기 제한 (최대 50개 항목)
+    if (chartDataCache.size > 50) {
+        const firstKey = chartDataCache.keys().next().value;
+        chartDataCache.delete(firstKey);
+    }
+}
+
+// 데이터 압축 (중복 제거 및 정밀도 조정)
+function compressChartData(data) {
+    if (!data || !data.timestamp) return data;
+    
+    // 모바일에서는 데이터 포인트 수를 줄여서 성능 향상
+    if (isMobile && data.timestamp.length > 200) {
+        const step = Math.ceil(data.timestamp.length / 200);
+        const compressed = {
+            timestamp: [],
+            ohlc: { open: [], high: [], low: [], close: [], volume: [] },
+            rsi: [],
+            macd: { line: [], signal: [], histogram: [] },
+            bbands: { upper: [], middle: [], lower: [] },
+            vwap: []
+        };
+        
+        for (let i = 0; i < data.timestamp.length; i += step) {
+            compressed.timestamp.push(data.timestamp[i]);
+            compressed.ohlc.open.push(data.ohlc.open[i]);
+            compressed.ohlc.high.push(data.ohlc.high[i]);
+            compressed.ohlc.low.push(data.ohlc.low[i]);
+            compressed.ohlc.close.push(data.ohlc.close[i]);
+            compressed.ohlc.volume.push(data.ohlc.volume[i]);
+            compressed.rsi.push(data.rsi[i]);
+            compressed.macd.line.push(data.macd.line[i]);
+            compressed.macd.signal.push(data.macd.signal[i]);
+            compressed.macd.histogram.push(data.macd.histogram[i]);
+            compressed.bbands.upper.push(data.bbands.upper[i]);
+            compressed.bbands.middle.push(data.bbands.middle[i]);
+            compressed.bbands.lower.push(data.bbands.lower[i]);
+            compressed.vwap.push(data.vwap[i]);
+        }
+        
+        // 메타데이터 보존
+        compressed.metadata = data.metadata;
+        compressed.confidence = data.confidence;
+        compressed.dynamic_analysis = data.dynamic_analysis;
+        compressed.risk_metrics = data.risk_metrics;
+        compressed.multi_timeframe = data.multi_timeframe;
+        compressed.backtest = data.backtest;
+        
+        return compressed;
+    }
+    
+    return data;
+}
+
+// 레이지 로딩 구현
+function createLazyImageObserver() {
+    if (!lazyLoadingEnabled || !('IntersectionObserver' in window)) return;
+    
+    const imageObserver = new IntersectionObserver((entries, observer) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                const img = entry.target;
+                img.src = img.dataset.src;
+                img.classList.remove('lazy');
+                observer.unobserve(img);
+            }
+        });
+    });
+    
+    document.querySelectorAll('img[data-src]').forEach(img => {
+        imageObserver.observe(img);
+    });
+}
+
+// 디바운스 유틸리티 (검색 최적화)
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
+    // 모바일 터치 핸들러 초기화
+    initMobileTouchHandlers();
+    addTouchRippleEffect();
+    
+    // 스크롤 이벤트 리스너 (FAB 표시/숨김)
+    if (isMobile) {
+        window.addEventListener('scroll', updateFabVisibility);
+    }
+    
+    // 성능 최적화 초기화
+    createLazyImageObserver();
+    
     // 터치 및 키보드 지원 추가
     addTouchSupport();
     addKeyboardSupport();

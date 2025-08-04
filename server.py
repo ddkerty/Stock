@@ -100,9 +100,650 @@ def calculate_macd(close, fast=12, slow=26, signal=9):
     histogram = macd_line - signal_line
     return macd_line, signal_line, histogram
 
-def calculate_vwap(high, low, close, volume):
+def calculate_vwap(high, low, close, volume, period=None):
     typical_price = (high + low + close) / 3
-    return (typical_price * volume).cumsum() / volume.cumsum()
+    if period:
+        # 기간 제한 VWAP
+        return (typical_price * volume).rolling(window=period).sum() / volume.rolling(window=period).sum()
+    else:
+        # 누적 VWAP (기존 방식)
+        return (typical_price * volume).cumsum() / volume.cumsum()
+
+def calculate_confidence_metrics(data):
+    """신뢰도 계산을 위한 메트릭스"""
+    try:
+        # 거래량 분석
+        recent_volume = data['Volume'].tail(5).mean()  # 최근 5일 평균
+        historical_volume = data['Volume'].tail(30).mean()  # 30일 평균
+        volume_ratio = recent_volume / historical_volume if historical_volume > 0 else 1
+        
+        # 변동성 분석
+        recent_volatility = data['Close'].pct_change().tail(10).std()  # 최근 10일 변동성
+        historical_volatility = data['Close'].pct_change().tail(60).std()  # 60일 변동성
+        volatility_ratio = recent_volatility / historical_volatility if historical_volatility > 0 else 1
+        
+        # 데이터 품질
+        total_points = len(data)
+        valid_points = data['Close'].notna().sum()
+        data_completeness = valid_points / total_points if total_points > 0 else 0
+        
+        return {
+            'volume_ratio': volume_ratio,
+            'volatility_ratio': volatility_ratio,
+            'data_completeness': data_completeness,
+            'data_points': total_points,
+            'recent_volume': recent_volume,
+            'historical_volume': historical_volume
+        }
+    except Exception as e:
+        logging.warning(f"Error calculating confidence metrics: {e}")
+        return {
+            'volume_ratio': 1.0,
+            'volatility_ratio': 1.0,
+            'data_completeness': 0.8,
+            'data_points': len(data) if hasattr(data, '__len__') else 0
+        }
+
+def calculate_indicator_confidence(indicator_name, value, metrics, additional_data=None):
+    """각 지표별 신뢰도 계산 (0-100)"""
+    base_confidence = 85  # 기본 신뢰도
+    
+    # 공통 신뢰도 요소
+    confidence = base_confidence
+    
+    # 거래량 기반 조정
+    if metrics['volume_ratio'] < 0.3:  # 거래량이 평소의 30% 미만
+        confidence -= 25
+    elif metrics['volume_ratio'] < 0.7:  # 거래량이 평소의 70% 미만
+        confidence -= 10
+    elif metrics['volume_ratio'] > 3.0:  # 거래량이 평소의 3배 초과
+        confidence -= 5  # 과도한 거래량도 약간 신뢰도 하락
+    
+    # 변동성 기반 조정
+    if metrics['volatility_ratio'] > 2.5:  # 변동성이 평소의 2.5배 초과
+        confidence -= 20
+    elif metrics['volatility_ratio'] > 1.8:  # 변동성이 평소의 1.8배 초과
+        confidence -= 10
+    
+    # 데이터 품질 기반 조정
+    if metrics['data_completeness'] < 0.8:  # 데이터 완성도 80% 미만
+        confidence -= 15
+    elif metrics['data_completeness'] < 0.9:  # 데이터 완성도 90% 미만
+        confidence -= 5
+    
+    # 지표별 특수 조정
+    if indicator_name == 'VWAP':
+        # VWAP은 거래량이 중요
+        if metrics['volume_ratio'] > 1.5:  # 충분한 거래량
+            confidence += 5
+        elif metrics['volume_ratio'] < 0.5:  # 거래량 부족
+            confidence -= 10
+            
+    elif indicator_name == 'RSI':
+        # RSI는 충분한 데이터 포인트가 중요
+        if metrics['data_points'] < 20:  # 20일 미만 데이터
+            confidence -= 20
+        elif metrics['data_points'] < 14:  # 14일 미만 데이터
+            confidence -= 30
+            
+    elif indicator_name == 'MACD':
+        # MACD는 추세 지표이므로 변동성에 더 민감
+        if metrics['volatility_ratio'] > 2.0:
+            confidence -= 15
+        if metrics['data_points'] < 26:  # MACD 계산에 필요한 최소 데이터
+            confidence -= 25
+    
+    elif indicator_name == 'Bollinger':
+        # 볼린저밴드는 변동성 지표이므로 극단적 변동성에서 오히려 유효
+        if 1.2 < metrics['volatility_ratio'] < 2.0:  # 적당한 변동성 증가
+            confidence += 5
+    
+    # 최종 신뢰도는 30-100 범위로 제한
+    return max(30, min(100, int(confidence)))
+
+def generate_warnings(metrics, data):
+    """경고 메시지 생성"""
+    warnings = []
+    
+    # 거래량 관련 경고
+    if metrics['volume_ratio'] < 0.3:
+        warnings.append({
+            'type': 'warning',
+            'icon': '⚠️',
+            'message': f"거래량이 평소의 {int(metrics['volume_ratio']*100)}% 수준으로 신호 신뢰도가 낮습니다"
+        })
+    elif metrics['volume_ratio'] > 4.0:
+        warnings.append({
+            'type': 'info',
+            'icon': '📈',
+            'message': f"거래량이 평소의 {int(metrics['volume_ratio']*100)}% 수준으로 급증했습니다"
+        })
+    
+    # 변동성 관련 경고
+    if metrics['volatility_ratio'] > 2.5:
+        warnings.append({
+            'type': 'warning',
+            'icon': '🌪️',
+            'message': f"변동성이 평소의 {metrics['volatility_ratio']:.1f}배로 높아 단기 변동 가능성이 큽니다"
+        })
+    elif metrics['volatility_ratio'] < 0.3:
+        warnings.append({
+            'type': 'info',
+            'icon': '😴',
+            'message': "변동성이 매우 낮아 횡보 상태일 가능성이 높습니다"
+        })
+    
+    # 데이터 품질 관련 경고
+    if metrics['data_completeness'] < 0.9:
+        warnings.append({
+            'type': 'error',
+            'icon': '🔧',
+            'message': f"데이터 완성도 {int(metrics['data_completeness']*100)}% - 일부 지표의 정확도가 떨어질 수 있습니다"
+        })
+    
+    # 데이터 수량 관련 경고
+    if metrics['data_points'] < 30:
+        warnings.append({
+            'type': 'warning',
+            'icon': '📊',
+            'message': f"분석 기간이 {metrics['data_points']}일로 짧아 장기 추세 분석에 한계가 있습니다"
+        })
+    
+    # 시장 시간 관련 경고 (추가 가능)
+    import datetime
+    now = datetime.datetime.now()
+    if now.weekday() >= 5:  # 주말
+        warnings.append({
+            'type': 'info',
+            'icon': '📅',
+            'message': "주말 데이터 - 시장 개장 시 가격 변동 가능성이 있습니다"
+        })
+    
+    return warnings
+
+def calculate_dynamic_thresholds(data):
+    """종목별 동적 임계값 계산"""
+    try:
+        # RSI 동적 임계값 (최근 90일 기준)
+        rsi_values = calculate_rsi(data['Close']).dropna()
+        if len(rsi_values) >= 30:
+            rsi_upper = np.percentile(rsi_values.tail(90), 80)  # 상위 20%
+            rsi_lower = np.percentile(rsi_values.tail(90), 20)  # 하위 20%
+            # 극단값 방지 (최소 5포인트 차이 유지)
+            rsi_upper = max(rsi_upper, 65)
+            rsi_lower = min(rsi_lower, 35)
+        else:
+            rsi_upper, rsi_lower = 70, 30  # 기본값
+
+        # 볼린저밴드 동적 기간 (변동성에 따라 조정)
+        volatility = data['Close'].pct_change().tail(30).std()
+        if volatility > 0.03:  # 높은 변동성
+            bb_period = 15  # 짧은 기간
+            bb_std = 2.2    # 넓은 밴드
+        elif volatility < 0.015:  # 낮은 변동성
+            bb_period = 25  # 긴 기간
+            bb_std = 1.8    # 좁은 밴드
+        else:
+            bb_period = 20  # 표준
+            bb_std = 2.0
+
+        # MACD 동적 파라미터 (추세 강도에 따라)
+        close_prices = data['Close'].tail(60)
+        if len(close_prices) >= 30:
+            # 추세 강도 계산 (선형 회귀 기울기)
+            x = np.arange(len(close_prices))
+            slope = np.polyfit(x, close_prices, 1)[0]
+            trend_strength = abs(slope) / close_prices.mean()
+            
+            if trend_strength > 0.001:  # 강한 추세
+                macd_fast, macd_slow, macd_signal = 8, 21, 7   # 빠른 반응
+            else:  # 약한 추세/횡보
+                macd_fast, macd_slow, macd_signal = 12, 26, 9  # 표준
+        else:
+            macd_fast, macd_slow, macd_signal = 12, 26, 9
+
+        # VWAP 신뢰도 기간 (거래량 패턴에 따라)
+        volume_cv = data['Volume'].tail(30).std() / data['Volume'].tail(30).mean()
+        if volume_cv > 1.0:  # 불규칙한 거래량
+            vwap_period = 10  # 짧은 기간
+        else:
+            vwap_period = 20  # 표준 기간
+
+        return {
+            'rsi': {
+                'upper_threshold': float(rsi_upper),
+                'lower_threshold': float(rsi_lower),
+                'explanation': f"과거 90일 기준 상위 20%({rsi_upper:.1f})/하위 20%({rsi_lower:.1f}) 수준"
+            },
+            'bollinger': {
+                'period': int(bb_period),
+                'std_dev': float(bb_std),
+                'explanation': f"변동성 조정: {bb_period}일 기간, {bb_std}σ 밴드"
+            },
+            'macd': {
+                'fast': int(macd_fast),
+                'slow': int(macd_slow),
+                'signal': int(macd_signal),
+                'explanation': f"추세 강도 조정: {macd_fast}-{macd_slow}-{macd_signal} 조합"
+            },
+            'vwap': {
+                'period': int(vwap_period),
+                'explanation': f"거래량 패턴 조정: {vwap_period}일 기준"
+            }
+        }
+    except Exception as e:
+        logging.warning(f"Error calculating dynamic thresholds: {e}")
+        return {
+            'rsi': {'upper_threshold': 70, 'lower_threshold': 30, 'explanation': '표준 임계값 (70/30)'},
+            'bollinger': {'period': 20, 'std_dev': 2.0, 'explanation': '표준 설정 (20일, 2σ)'},
+            'macd': {'fast': 12, 'slow': 26, 'signal': 9, 'explanation': '표준 설정 (12-26-9)'},
+            'vwap': {'period': 20, 'explanation': '표준 기간 (20일)'}
+        }
+
+def analyze_multiple_timeframes(ticker, base_period='1y'):
+    """
+    다중 시간대 분석 - 단기, 중기, 장기 신호 일치도 확인
+    """
+    try:
+        timeframes = {
+            'short': {'period': '1mo', 'interval': '1d', 'name': '단기 (1개월)'},
+            'medium': {'period': '3mo', 'interval': '1d', 'name': '중기 (3개월)'},
+            'long': {'period': '1y', 'interval': '1wk', 'name': '장기 (1년)'}
+        }
+        
+        results = {}
+        stock = yf.Ticker(ticker)
+        
+        for timeframe_key, config in timeframes.items():
+            try:
+                data = stock.history(period=config['period'], interval=config['interval'], timeout=5)
+                if data.empty or len(data) < 10:
+                    continue
+                    
+                # 각 시간대별 신호 계산
+                rsi = calculate_rsi(data['Close'])
+                macd_line, macd_signal, macd_hist = calculate_macd(data['Close'])
+                bbu, bbm, bbl = calculate_bbands(data['Close'])
+                
+                if len(rsi) == 0 or len(macd_line) == 0 or len(bbu) == 0:
+                    continue
+                
+                # 최신 값들
+                latest_rsi = rsi.iloc[-1] if len(rsi) > 0 else None
+                latest_macd = macd_line.iloc[-1] - macd_signal.iloc[-1] if len(macd_line) > 0 else None
+                latest_close = data['Close'].iloc[-1]
+                latest_bb_upper = bbu.iloc[-1] if len(bbu) > 0 else None
+                latest_bb_lower = bbl.iloc[-1] if len(bbl) > 0 else None
+                
+                # 신호 판정
+                signals = {}
+                
+                # RSI 신호
+                if latest_rsi is not None:
+                    if latest_rsi > 70:
+                        signals['rsi'] = 'bearish'
+                    elif latest_rsi < 30:
+                        signals['rsi'] = 'bullish'
+                    else:
+                        signals['rsi'] = 'neutral'
+                
+                # MACD 신호
+                if latest_macd is not None:
+                    if latest_macd > 0:
+                        signals['macd'] = 'bullish'
+                    elif latest_macd < 0:
+                        signals['macd'] = 'bearish'
+                    else:
+                        signals['macd'] = 'neutral'
+                
+                # 볼린저밴드 신호
+                if latest_bb_upper is not None and latest_bb_lower is not None:
+                    if latest_close > latest_bb_upper:
+                        signals['bollinger'] = 'bearish'
+                    elif latest_close < latest_bb_lower:
+                        signals['bollinger'] = 'bullish'
+                    else:
+                        signals['bollinger'] = 'neutral'
+                
+                # 종합 신호
+                bullish_count = sum(1 for signal in signals.values() if signal == 'bullish')
+                bearish_count = sum(1 for signal in signals.values() if signal == 'bearish')
+                
+                if bullish_count >= 2:
+                    overall_signal = 'bullish'
+                elif bearish_count >= 2:
+                    overall_signal = 'bearish'
+                else:
+                    overall_signal = 'neutral'
+                
+                results[timeframe_key] = {
+                    'name': config['name'],
+                    'signals': signals,
+                    'overall': overall_signal,
+                    'data_points': len(data)
+                }
+                
+            except Exception as e:
+                logging.warning(f"Timeframe analysis failed for {timeframe_key}: {e}")
+                continue
+        
+        # 시간대 간 일치도 계산
+        if len(results) >= 2:
+            overall_signals = [result['overall'] for result in results.values()]
+            bullish_timeframes = sum(1 for signal in overall_signals if signal == 'bullish')
+            bearish_timeframes = sum(1 for signal in overall_signals if signal == 'bearish')
+            
+            if bullish_timeframes >= 2:
+                consensus = 'bullish'
+                confidence = int((bullish_timeframes / len(results)) * 100)
+            elif bearish_timeframes >= 2:
+                consensus = 'bearish'
+                confidence = int((bearish_timeframes / len(results)) * 100)
+            else:
+                consensus = 'mixed'
+                confidence = 50
+        else:
+            consensus = 'insufficient_data'
+            confidence = 0
+        
+        return {
+            'timeframes': results,
+            'consensus': consensus,
+            'confidence': confidence,
+            'total_timeframes': len(results)
+        }
+        
+    except Exception as e:
+        logging.error(f"Multi-timeframe analysis error: {e}")
+        return {
+            'timeframes': {},
+            'consensus': 'error',
+            'confidence': 0,
+            'total_timeframes': 0
+        }
+
+def calculate_risk_metrics(data, market_data=None):
+    """
+    리스크 지표 계산 (MDD, 샤프비율, 베타)
+    """
+    try:
+        returns = data['Close'].pct_change().dropna()
+        
+        # 1. Maximum Drawdown (MDD) 계산
+        cumulative = (1 + returns).cumprod()
+        running_max = cumulative.expanding().max()
+        drawdown = (cumulative - running_max) / running_max
+        mdd = float(drawdown.min() * 100)  # 백분율
+        
+        # 2. 샤프 비율 계산 (연율화)
+        risk_free_rate = 0.025  # 2.5% 무위험 수익률 (한국 국채 3년물 기준)
+        annual_return = float(returns.mean() * 252)
+        annual_volatility = float(returns.std() * np.sqrt(252))
+        
+        if annual_volatility > 0:
+            sharpe_ratio = (annual_return - risk_free_rate) / annual_volatility
+        else:
+            sharpe_ratio = 0
+            
+        # 3. 베타 계산 (KOSPI 대비, 시장 데이터가 있는 경우)
+        beta = None
+        if market_data is not None and len(market_data) > 0:
+            try:
+                market_returns = market_data['Close'].pct_change().dropna()
+                # 공통 기간 맞추기
+                common_dates = returns.index.intersection(market_returns.index)
+                if len(common_dates) > 30:
+                    stock_returns_aligned = returns.loc[common_dates]
+                    market_returns_aligned = market_returns.loc[common_dates]
+                    
+                    covariance = np.cov(stock_returns_aligned, market_returns_aligned)[0, 1]
+                    market_variance = np.var(market_returns_aligned)
+                    
+                    if market_variance > 0:
+                        beta = float(covariance / market_variance)
+            except Exception as e:
+                logging.warning(f"Beta calculation error: {e}")
+                beta = None
+        
+        # 4. 변동성 (연율화)
+        volatility = float(annual_volatility * 100)  # 백분율
+        
+        # 5. 승률 계산
+        win_rate = float((returns > 0).sum() / len(returns) * 100)
+        
+        return {
+            'mdd': round(mdd, 2),
+            'sharpe_ratio': round(sharpe_ratio, 3),
+            'beta': round(beta, 3) if beta is not None else None,
+            'volatility': round(volatility, 2),
+            'win_rate': round(win_rate, 1),
+            'annual_return': round(annual_return * 100, 2)
+        }
+        
+    except Exception as e:
+        logging.error(f"Risk metrics calculation error: {e}")
+        return {
+            'mdd': None,
+            'sharpe_ratio': None,
+            'beta': None,
+            'volatility': None,
+            'win_rate': None,
+            'annual_return': None
+        }
+
+def backtest_signals(data, dynamic_thresholds, lookback_days=30):
+    """
+    지표별 신호의 과거 성과를 백테스팅
+    lookback_days: 백테스팅할 기간 (일)
+    """
+    try:
+        if len(data) < lookback_days + 20:  # 최소 데이터 요구사항
+            return {}
+        
+        results = {}
+        
+        # 백테스팅용 데이터 준비
+        test_data = data.tail(lookback_days + 20).copy()  # 지표 계산을 위해 여유분 추가
+        
+        # 각 지표별 백테스팅
+        results['rsi'] = backtest_rsi_signals(test_data, dynamic_thresholds)
+        results['macd'] = backtest_macd_signals(test_data, dynamic_thresholds)
+        results['bollinger'] = backtest_bollinger_signals(test_data, dynamic_thresholds)
+        results['vwap'] = backtest_vwap_signals(test_data, dynamic_thresholds)
+        
+        return results
+        
+    except Exception as e:
+        logging.warning(f"Error in backtest_signals: {e}")
+        return {}
+
+def backtest_rsi_signals(data, thresholds):
+    """RSI 신호 백테스팅"""
+    try:
+        rsi = calculate_rsi(data['Close'])
+        upper_threshold = thresholds.get('rsi', {}).get('upper_threshold', 70)
+        lower_threshold = thresholds.get('rsi', {}).get('lower_threshold', 30)
+        
+        signals = []
+        returns = []
+        
+        for i in range(20, len(data) - 5):  # 신호 발생 후 5일 수익률 측정
+            current_rsi = rsi.iloc[i]
+            if pd.isna(current_rsi):
+                continue
+                
+            current_price = data['Close'].iloc[i]
+            future_price = data['Close'].iloc[i + 5]  # 5일 후 가격
+            
+            if current_rsi > upper_threshold:  # 과매수 신호 (매도)
+                signals.append('sell')
+                returns.append((current_price - future_price) / current_price)  # 매도 수익률
+            elif current_rsi < lower_threshold:  # 과매도 신호 (매수)
+                signals.append('buy')
+                returns.append((future_price - current_price) / current_price)  # 매수 수익률
+        
+        if not returns:
+            return {'accuracy': 0, 'avg_return': 0, 'total_signals': 0, 'win_rate': 0}
+        
+        positive_returns = [r for r in returns if r > 0]
+        accuracy = len(positive_returns) / len(returns) * 100
+        avg_return = sum(returns) / len(returns) * 100
+        win_rate = len(positive_returns) / len(returns) * 100
+        
+        return {
+            'accuracy': round(accuracy, 1),
+            'avg_return': round(avg_return, 2),
+            'total_signals': len(returns),
+            'win_rate': round(win_rate, 1),
+            'period_days': 5
+        }
+        
+    except Exception as e:
+        logging.warning(f"Error in backtest_rsi_signals: {e}")
+        return {'accuracy': 0, 'avg_return': 0, 'total_signals': 0, 'win_rate': 0}
+
+def backtest_macd_signals(data, thresholds):
+    """MACD 신호 백테스팅"""
+    try:
+        macd_params = thresholds.get('macd', {})
+        macd_line, macd_signal, _ = calculate_macd(
+            data['Close'],
+            fast=macd_params.get('fast', 12),
+            slow=macd_params.get('slow', 26),
+            signal=macd_params.get('signal', 9)
+        )
+        
+        signals = []
+        returns = []
+        
+        for i in range(30, len(data) - 3):  # MACD는 더 많은 초기 데이터 필요
+            prev_macd = macd_line.iloc[i-1]
+            curr_macd = macd_line.iloc[i]
+            prev_signal = macd_signal.iloc[i-1]
+            curr_signal = macd_signal.iloc[i]
+            
+            if pd.isna(prev_macd) or pd.isna(curr_macd) or pd.isna(prev_signal) or pd.isna(curr_signal):
+                continue
+            
+            current_price = data['Close'].iloc[i]
+            future_price = data['Close'].iloc[i + 3]  # 3일 후 가격
+            
+            # 골든 크로스 (매수 신호)
+            if prev_macd <= prev_signal and curr_macd > curr_signal:
+                signals.append('buy')
+                returns.append((future_price - current_price) / current_price)
+            # 데드 크로스 (매도 신호)
+            elif prev_macd >= prev_signal and curr_macd < curr_signal:
+                signals.append('sell')
+                returns.append((current_price - future_price) / current_price)
+        
+        if not returns:
+            return {'accuracy': 0, 'avg_return': 0, 'total_signals': 0, 'win_rate': 0}
+        
+        positive_returns = [r for r in returns if r > 0]
+        accuracy = len(positive_returns) / len(returns) * 100
+        avg_return = sum(returns) / len(returns) * 100
+        
+        return {
+            'accuracy': round(accuracy, 1),
+            'avg_return': round(avg_return, 2),
+            'total_signals': len(returns),
+            'win_rate': round(accuracy, 1),
+            'period_days': 3
+        }
+        
+    except Exception as e:
+        logging.warning(f"Error in backtest_macd_signals: {e}")
+        return {'accuracy': 0, 'avg_return': 0, 'total_signals': 0, 'win_rate': 0}
+
+def backtest_bollinger_signals(data, thresholds):
+    """볼린저밴드 신호 백테스팅"""
+    try:
+        bb_params = thresholds.get('bollinger', {})
+        upper, middle, lower = calculate_bbands(
+            data['Close'],
+            length=bb_params.get('period', 20),
+            std=bb_params.get('std_dev', 2.0)
+        )
+        
+        returns = []
+        
+        for i in range(25, len(data) - 3):
+            current_price = data['Close'].iloc[i]
+            future_price = data['Close'].iloc[i + 3]
+            
+            upper_val = upper.iloc[i]
+            lower_val = lower.iloc[i]
+            
+            if pd.isna(upper_val) or pd.isna(lower_val):
+                continue
+            
+            # 상단 돌파 (매수 신호) - 단순히 돌파만으로는 위험하므로 조건 완화
+            if current_price > upper_val:
+                returns.append((future_price - current_price) / current_price)
+            # 하단 이탈 (매수 기회)
+            elif current_price < lower_val:
+                returns.append((future_price - current_price) / current_price)
+        
+        if not returns:
+            return {'accuracy': 0, 'avg_return': 0, 'total_signals': 0, 'win_rate': 0}
+        
+        positive_returns = [r for r in returns if r > 0]
+        accuracy = len(positive_returns) / len(returns) * 100
+        avg_return = sum(returns) / len(returns) * 100
+        
+        return {
+            'accuracy': round(accuracy, 1),
+            'avg_return': round(avg_return, 2),
+            'total_signals': len(returns),
+            'win_rate': round(accuracy, 1),
+            'period_days': 3
+        }
+        
+    except Exception as e:
+        logging.warning(f"Error in backtest_bollinger_signals: {e}")
+        return {'accuracy': 0, 'avg_return': 0, 'total_signals': 0, 'win_rate': 0}
+
+def backtest_vwap_signals(data, thresholds):
+    """VWAP 신호 백테스팅"""
+    try:
+        vwap_period = thresholds.get('vwap', {}).get('period', 20)
+        vwap = calculate_vwap(data['High'], data['Low'], data['Close'], data['Volume'], period=vwap_period)
+        
+        returns = []
+        
+        for i in range(25, len(data) - 2):
+            current_price = data['Close'].iloc[i]
+            future_price = data['Close'].iloc[i + 2]  # 2일 후
+            current_vwap = vwap.iloc[i]
+            
+            if pd.isna(current_vwap):
+                continue
+            
+            # VWAP 위/아래 기준 신호
+            if current_price > current_vwap:  # VWAP 위 (매수 신호)
+                returns.append((future_price - current_price) / current_price)
+            elif current_price < current_vwap:  # VWAP 아래 (매도 또는 관망)
+                returns.append((current_price - future_price) / current_price)
+        
+        if not returns:
+            return {'accuracy': 0, 'avg_return': 0, 'total_signals': 0, 'win_rate': 0}
+        
+        positive_returns = [r for r in returns if r > 0]
+        accuracy = len(positive_returns) / len(returns) * 100
+        avg_return = sum(returns) / len(returns) * 100
+        
+        return {
+            'accuracy': round(accuracy, 1),
+            'avg_return': round(avg_return, 2),
+            'total_signals': len(returns),
+            'win_rate': round(accuracy, 1),
+            'period_days': 2
+        }
+        
+    except Exception as e:
+        logging.warning(f"Error in backtest_vwap_signals: {e}")
+        return {'accuracy': 0, 'avg_return': 0, 'total_signals': 0, 'win_rate': 0}
 
 
 # --- 에러 핸들링 데코레이터 ---
@@ -240,11 +881,59 @@ def get_stock_data():
             "code": "INSUFFICIENT_DATA"
         }), 400
 
-    # 기술적 지표 계산
-    bbu, bbm, bbl = calculate_bbands(data['Close'])
-    rsi = calculate_rsi(data['Close'])
-    macd_line, macd_signal, macd_hist = calculate_macd(data['Close'])
-    vwap = calculate_vwap(data['High'], data['Low'], data['Close'], data['Volume'])
+    # 동적 임계값 계산
+    dynamic_thresholds = calculate_dynamic_thresholds(data)
+    
+    # 동적 파라미터를 적용한 기술적 지표 계산
+    bbu, bbm, bbl = calculate_bbands(
+        data['Close'], 
+        length=dynamic_thresholds['bollinger']['period'],
+        std=dynamic_thresholds['bollinger']['std_dev']
+    )
+    rsi = calculate_rsi(data['Close'])  # RSI는 계산 자체는 동일, 임계값만 동적 적용
+    macd_line, macd_signal, macd_hist = calculate_macd(
+        data['Close'],
+        fast=dynamic_thresholds['macd']['fast'],
+        slow=dynamic_thresholds['macd']['slow'],
+        signal=dynamic_thresholds['macd']['signal']
+    )
+    vwap = calculate_vwap(
+        data['High'], data['Low'], data['Close'], data['Volume'],
+        period=dynamic_thresholds['vwap']['period']
+    )
+
+    # 신뢰도 메트릭스 계산
+    confidence_metrics = calculate_confidence_metrics(data)
+    
+    # 각 지표별 신뢰도 계산
+    confidences = {
+        'vwap': calculate_indicator_confidence('VWAP', vwap.iloc[-1] if len(vwap) > 0 else None, confidence_metrics),
+        'rsi': calculate_indicator_confidence('RSI', rsi.iloc[-1] if len(rsi) > 0 else None, confidence_metrics),
+        'macd': calculate_indicator_confidence('MACD', macd_line.iloc[-1] if len(macd_line) > 0 else None, confidence_metrics),
+        'bollinger': calculate_indicator_confidence('Bollinger', bbu.iloc[-1] if len(bbu) > 0 else None, confidence_metrics)
+    }
+    
+    # 백테스팅 결과 계산
+    backtest_results = backtest_signals(data, dynamic_thresholds)
+    
+    # KOSPI 데이터 가져오기 (베타 계산용)
+    market_data = None
+    try:
+        kospi_ticker = yf.Ticker("^KS11")  # KOSPI 지수
+        market_data = kospi_ticker.history(period=data_range, interval=interval, timeout=5)
+        if market_data.empty:
+            market_data = None
+    except Exception as e:
+        logging.warning(f"Market data fetch failed: {e}")
+        market_data = None
+    
+    # 리스크 지표 계산
+    risk_metrics = calculate_risk_metrics(data, market_data)
+    
+    # 다중 시간대 분석 (장기 분석에서만 실행)
+    multi_timeframe = None
+    if data_range in ['3mo', '6mo', '1y', '2y', '5y', 'max'] and interval in ['1d', '1wk']:
+        multi_timeframe = analyze_multiple_timeframes(ticker, data_range)
 
     # 안전한 데이터 변환
     def safe_convert(series):
@@ -278,6 +967,28 @@ def get_stock_data():
             "data_points": len(data),
             "start_date": data.index[0].isoformat(),
             "end_date": data.index[-1].isoformat()
+        },
+        "confidence": {
+            "indicators": confidences,
+            "metrics": {
+                "volume_ratio": round(confidence_metrics['volume_ratio'], 2),
+                "volatility_ratio": round(confidence_metrics['volatility_ratio'], 2),
+                "data_completeness": round(confidence_metrics['data_completeness'], 2),
+                "data_quality_score": int(confidence_metrics['data_completeness'] * 100)
+            },
+            "warnings": generate_warnings(confidence_metrics, data)
+        },
+        "dynamic_analysis": {
+            "thresholds": dynamic_thresholds,
+            "is_optimized": True,
+            "explanation": "이 종목의 특성에 맞게 최적화된 분석 파라미터가 적용되었습니다."
+        },
+        "risk_metrics": risk_metrics,
+        "multi_timeframe": multi_timeframe,
+        "backtest": {
+            "results": backtest_results,
+            "explanation": "최근 30일간 각 지표의 실제 성과를 기반으로 한 신호 검증 결과입니다.",
+            "disclaimer": "과거 성과가 미래 수익을 보장하지 않습니다."
         }
     }
     

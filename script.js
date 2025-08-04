@@ -574,7 +574,14 @@ function renderFundamentalStats(info) {
     const { stats, rawStats } = info;
     const gradeBadge = document.getElementById('stats-grade');
     gradeBadge.textContent = stats.grade;
-    const gradeColors = { "A (매우 우수)": 'bg-danger', "B (우수)": 'bg-primary', "C (보통)": 'bg-success', "D (주의)": 'bg-warning', "F (위험)": 'bg-secondary' };
+    const gradeColors = { 
+        "A (매우 우수)": 'bg-success',      // 초록 (매우 좋음)
+        "B (우수)": 'bg-primary',           // 파랑 (좋음)
+        "C (양호)": 'bg-info',              // 하늘색 (양호)
+        "D (보통)": 'bg-warning',           // 노랑 (보통)
+        "E (주의)": 'bg-danger',            // 빨강 (주의)
+        "F (위험)": 'bg-dark'               // 검정 (위험)
+    };
     gradeBadge.className = `badge fs-5 ${gradeColors[stats.grade] || 'bg-dark'}`;
     const rawDataList = document.getElementById('raw-data-list');
     rawDataList.innerHTML = `

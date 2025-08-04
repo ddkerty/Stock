@@ -1080,39 +1080,77 @@ def get_stock_info():
 
 def calculate_fundamental_stats(info):
     scores = {'value': 0, 'growth': 0, 'profitability': 0, 'stability': 0}
+    
+    # 1. 가치 평가 (PE 비율) - 더 엄격한 기준
     per = info.get('trailingPE')
     if per and isinstance(per, (int, float)) and per > 0:
-        if per < 10: scores['value'] = 100
-        elif per < 15: scores['value'] = 80
-        elif per < 25: scores['value'] = 60
-        else: scores['value'] = 30
+        if per < 8: scores['value'] = 100        # 매우 저평가
+        elif per < 12: scores['value'] = 90      # 저평가
+        elif per < 18: scores['value'] = 75      # 적정가치
+        elif per < 25: scores['value'] = 50      # 약간 고평가
+        elif per < 35: scores['value'] = 25      # 고평가
+        else: scores['value'] = 10               # 매우 고평가
+    
+    # 2. 성장성 - 지속가능성 고려
     growth = info.get('earningsGrowth')
+    revenue_growth = info.get('revenueGrowth')
+    
     if growth and isinstance(growth, (int, float)):
-        if growth > 0.2: scores['growth'] = 100
-        elif growth > 0.1: scores['growth'] = 80
-        elif growth > 0: scores['growth'] = 60
-        else: scores['growth'] = 20
+        # 매출 성장도 함께 고려
+        revenue_bonus = 0
+        if revenue_growth and isinstance(revenue_growth, (int, float)) and revenue_growth > 0.05:
+            revenue_bonus = 10  # 매출도 성장하면 보너스
+        
+        if growth > 0.25: scores['growth'] = min(100, 85 + revenue_bonus)   # 25% 이상 (매우 높음)
+        elif growth > 0.15: scores['growth'] = min(100, 75 + revenue_bonus)  # 15-25% (높음)
+        elif growth > 0.08: scores['growth'] = min(100, 65 + revenue_bonus)  # 8-15% (양호)
+        elif growth > 0: scores['growth'] = min(100, 45 + revenue_bonus)     # 0-8% (보통)
+        else: scores['growth'] = 20  # 마이너스 성장
+    
+    # 3. 수익성 (ROE) - 더 세분화된 기준
     roe = info.get('returnOnEquity')
     if roe and isinstance(roe, (int, float)):
-        if roe > 0.20: scores['profitability'] = 100
-        elif roe > 0.15: scores['profitability'] = 80
-        else: scores['profitability'] = 50
+        if roe > 0.25: scores['profitability'] = 100      # 25% 이상 (매우 우수)
+        elif roe > 0.18: scores['profitability'] = 85     # 18-25% (우수)
+        elif roe > 0.12: scores['profitability'] = 70     # 12-18% (양호)
+        elif roe > 0.08: scores['profitability'] = 55     # 8-12% (보통)
+        elif roe > 0.05: scores['profitability'] = 40     # 5-8% (부족)
+        else: scores['profitability'] = 20                # 5% 미만 (매우 부족)
+    
+    # 4. 안정성 - 업종별 특성 일부 반영
     debt_to_equity = info.get('debtToEquity')
-    if debt_to_equity and isinstance(debt_to_equity, (int, float)):
-        if debt_to_equity < 50: scores['stability'] = 100
-        elif debt_to_equity < 100: scores['stability'] = 80
-        elif debt_to_equity < 200: scores['stability'] = 50
-        else: scores['stability'] = 20
-    total_score = np.mean(list(scores.values()))
+    sector = info.get('sector', '')
+    
+    if debt_to_equity is not None and isinstance(debt_to_equity, (int, float)):
+        # 금융업종은 부채비율 기준 완화
+        if 'Financial' in sector or 'Bank' in sector:
+            if debt_to_equity < 200: scores['stability'] = 90
+            elif debt_to_equity < 400: scores['stability'] = 70
+            elif debt_to_equity < 600: scores['stability'] = 50
+            else: scores['stability'] = 30
+        # 일반 업종
+        else:
+            if debt_to_equity < 30: scores['stability'] = 100     # 매우 안전
+            elif debt_to_equity < 60: scores['stability'] = 85    # 안전
+            elif debt_to_equity < 100: scores['stability'] = 65   # 양호
+            elif debt_to_equity < 150: scores['stability'] = 45   # 보통
+            elif debt_to_equity < 250: scores['stability'] = 25   # 위험
+            else: scores['stability'] = 10                        # 매우 위험
+    
+    # 유효한 점수만으로 평균 계산
+    valid_scores = [score for score in scores.values() if score > 0]
+    total_score = np.mean(valid_scores) if valid_scores else 0
+    
     grade = get_grade(total_score)
     return {"scores": scores, "totalScore": total_score, "grade": grade}
 
 def get_grade(score):
-    if score >= 80: return "A (매우 우수)"
-    if score >= 70: return "B (우수)"
-    if score >= 60: return "C (보통)"
-    if score >= 50: return "D (주의)"
-    return "F (위험)"
+    if score >= 85: return "A (매우 우수)"      # 매우 엄격한 기준
+    if score >= 75: return "B (우수)"          # 우수
+    if score >= 65: return "C (양호)"          # 양호
+    if score >= 50: return "D (보통)"          # 보통
+    if score >= 30: return "E (주의)"          # 주의
+    return "F (위험)"                          # 위험
 
 
 # --- 앱 실행 ---

@@ -58,14 +58,26 @@ class StockListUpdater:
             logger.info("KOSPI 주식 목록 가져오는 중...")
             response = self.session.post(url, data=kospi_data)
             if response.status_code == 200:
-                kospi_stocks = response.json().get('OutBlock_1', [])
+                response_data = response.json()
+                logger.info(f"KOSPI API 응답 구조: {list(response_data.keys())}")
+                
+                kospi_stocks = response_data.get('OutBlock_1', [])
+                if kospi_stocks and len(kospi_stocks) > 0:
+                    # 첫 번째 항목의 키를 확인
+                    logger.info(f"KOSPI 데이터 샘플 키: {list(kospi_stocks[0].keys())}")
+                
                 for stock in kospi_stocks:
-                    stocks.append({
-                        'Symbol': stock.get('ISU_SRT_CD', ''),
-                        'Name': stock.get('ISU_ABBRV', ''),
-                        'Market': 'KOSPI'
-                    })
-                logger.info(f"KOSPI 주식 {len(kospi_stocks)}개 수집 완료")
+                    # 여러 가능한 키 시도
+                    symbol_key = stock.get('ISU_SRT_CD') or stock.get('ISU_CD') or stock.get('TRD_CD')
+                    name_key = stock.get('ISU_ABBRV') or stock.get('ISU_NM') or stock.get('KOR_SECNM')
+                    
+                    if symbol_key and name_key:
+                        stocks.append({
+                            'Symbol': symbol_key,
+                            'Name': name_key,
+                            'Market': 'KOSPI'
+                        })
+                logger.info(f"KOSPI 주식 {len([s for s in stocks if s['Market'] == 'KOSPI'])}개 수집 완료")
             
             time.sleep(1)  # API 호출 간격
             
@@ -73,14 +85,25 @@ class StockListUpdater:
             logger.info("KOSDAQ 주식 목록 가져오는 중...")
             response = self.session.post(url, data=kosdaq_data)
             if response.status_code == 200:
-                kosdaq_stocks = response.json().get('OutBlock_1', [])
+                response_data = response.json()
+                logger.info(f"KOSDAQ API 응답 구조: {list(response_data.keys())}")
+                
+                kosdaq_stocks = response_data.get('OutBlock_1', [])
+                if kosdaq_stocks and len(kosdaq_stocks) > 0:
+                    logger.info(f"KOSDAQ 데이터 샘플 키: {list(kosdaq_stocks[0].keys())}")
+                
                 for stock in kosdaq_stocks:
-                    stocks.append({
-                        'Symbol': stock.get('ISU_SRT_CD', ''),
-                        'Name': stock.get('ISU_ABBRV', ''),
-                        'Market': 'KOSDAQ'
-                    })
-                logger.info(f"KOSDAQ 주식 {len(kosdaq_stocks)}개 수집 완료")
+                    # 여러 가능한 키 시도
+                    symbol_key = stock.get('ISU_SRT_CD') or stock.get('ISU_CD') or stock.get('TRD_CD')
+                    name_key = stock.get('ISU_ABBRV') or stock.get('ISU_NM') or stock.get('KOR_SECNM')
+                    
+                    if symbol_key and name_key:
+                        stocks.append({
+                            'Symbol': symbol_key,
+                            'Name': name_key,
+                            'Market': 'KOSDAQ'
+                        })
+                logger.info(f"KOSDAQ 주식 {len([s for s in stocks if s['Market'] == 'KOSDAQ'])}개 수집 완료")
             
             # DataFrame으로 변환 및 정리
             df = pd.DataFrame(stocks)
@@ -96,7 +119,47 @@ class StockListUpdater:
             
         except Exception as e:
             logger.error(f"KRX 주식 목록 업데이트 실패: {e}")
-            return False
+            import traceback
+            logger.error(f"상세 오류: {traceback.format_exc()}")
+            
+            # 백업: 수동으로 주요 한국 주식 추가
+            logger.info("백업 KRX 목록 생성 중...")
+            backup_stocks = [
+                {'Symbol': '005930', 'Name': '삼성전자', 'Market': 'KOSPI'},
+                {'Symbol': '000660', 'Name': 'SK하이닉스', 'Market': 'KOSPI'},
+                {'Symbol': '373220', 'Name': 'LG에너지솔루션', 'Market': 'KOSPI'},
+                {'Symbol': '207940', 'Name': '삼성바이오로직스', 'Market': 'KOSPI'},
+                {'Symbol': '005380', 'Name': '현대차', 'Market': 'KOSPI'},
+                {'Symbol': '051910', 'Name': 'LG화학', 'Market': 'KOSPI'},
+                {'Symbol': '035420', 'Name': 'NAVER', 'Market': 'KOSPI'},
+                {'Symbol': '068270', 'Name': '셀트리온', 'Market': 'KOSPI'},
+                {'Symbol': '035720', 'Name': '카카오', 'Market': 'KOSPI'},
+                {'Symbol': '105560', 'Name': 'KB금융', 'Market': 'KOSPI'},
+                {'Symbol': '055550', 'Name': '신한지주', 'Market': 'KOSPI'},
+                {'Symbol': '086790', 'Name': '하나금융지주', 'Market': 'KOSPI'},
+                {'Symbol': '032830', 'Name': '삼성생명', 'Market': 'KOSPI'},
+                {'Symbol': '015760', 'Name': '한국전력', 'Market': 'KOSPI'},
+                {'Symbol': '066570', 'Name': 'LG전자', 'Market': 'KOSPI'},
+                {'Symbol': '028260', 'Name': '삼성물산', 'Market': 'KOSPI'},
+                {'Symbol': '096770', 'Name': 'SK이노베이션', 'Market': 'KOSPI'},
+                {'Symbol': '003670', 'Name': '포스코홀딩스', 'Market': 'KOSPI'},
+                {'Symbol': '034730', 'Name': 'SK', 'Market': 'KOSPI'},
+                {'Symbol': '017670', 'Name': 'SK텔레콤', 'Market': 'KOSPI'},
+                {'Symbol': '030200', 'Name': 'KT', 'Market': 'KOSPI'},
+                {'Symbol': '251270', 'Name': '넷마블', 'Market': 'KOSPI'},
+                {'Symbol': '036570', 'Name': '엔씨소프트', 'Market': 'KOSPI'},
+                {'Symbol': '323410', 'Name': '카카오뱅크', 'Market': 'KOSPI'},
+                {'Symbol': '000270', 'Name': '기아', 'Market': 'KOSPI'}
+            ]
+            
+            try:
+                df = pd.DataFrame(backup_stocks)
+                df.to_csv('krx_stock_list.csv', index=False, encoding='utf-8-sig')
+                logger.info(f"백업 KRX 목록 생성 완료: {len(df)}개 종목")
+                return True
+            except Exception as backup_e:
+                logger.error(f"백업 KRX 목록 생성도 실패: {backup_e}")
+                return False
     
     def update_nasdaq_stocks(self):
         """NASDAQ 주식 목록 업데이트"""

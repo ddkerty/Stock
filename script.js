@@ -45,9 +45,14 @@ const intervalSelect = document.getElementById('interval-select');
 
 // --- 데이터 ---
 const popularTickers = [
-    { name: '삼성전자', symbol: '005930.KS' }, { name: 'Apple', symbol: 'AAPL' },
-    { name: 'Tesla', symbol: 'TSLA' }, { name: 'NVIDIA', symbol: 'NVDA' },
-    { name: 'SK하이닉스', symbol: '000660.KS' },
+    { name: '삼성전자', symbol: '005930.KS', market: 'KRX' },
+    { name: 'SK하이닉스', symbol: '000660.KS', market: 'KRX' },
+    { name: 'Apple', symbol: 'AAPL', market: 'S&P 500' },
+    { name: 'Microsoft', symbol: 'MSFT', market: 'S&P 500' },
+    { name: 'NVIDIA', symbol: 'NVDA', market: 'S&P 500' },
+    { name: 'Tesla', symbol: 'TSLA', market: 'S&P 500' },
+    { name: 'Amazon', symbol: 'AMZN', market: 'S&P 500' },
+    { name: 'Meta', symbol: 'META', market: 'S&P 500' }
 ];
 
 
@@ -1178,23 +1183,73 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     applyTheme(localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
     
-    // 주식 목록 로드 (에러 처리 개선)
+    // 주식 목록 로드 (KRX, NASDAQ, S&P 500)
     try {
-        const [krxRes, nasdaqRes] = await Promise.all([
+        const [krxRes, nasdaqRes, sp500Res] = await Promise.all([
             fetch('krx_stock_list.csv'),
-            fetch('nasdaq_stock_list.csv')
+            fetch('nasdaq_stock_list.csv'),
+            fetch('sp500_stock_list.csv').catch(() => null) // S&P 500은 선택적
         ]);
         
         if (!krxRes.ok || !nasdaqRes.ok) {
-            throw new Error('주식 목록을 불러올 수 없습니다');
+            throw new Error('필수 주식 목록을 불러올 수 없습니다');
         }
         
-        const [krxText, nasdaqText] = await Promise.all([krxRes.text(), nasdaqRes.text()]);
-        const krxData = Papa.parse(krxText, { header: true, skipEmptyLines: true }).data.map(s => ({ Symbol: s.Symbol, Name: s.Name }));
-        const nasdaqData = Papa.parse(nasdaqText, { header: true, skipEmptyLines: true, transformHeader: h => h.trim().toLowerCase() === 'symbol' ? 'Symbol' : 'Name' }).data.map(s => ({ Symbol: s.Symbol, Name: s.Name }));
-        stockList = [...krxData, ...nasdaqData].filter(s => s.Symbol && s.Name);
+        const fetchPromises = [krxRes.text(), nasdaqRes.text()];
+        if (sp500Res && sp500Res.ok) {
+            fetchPromises.push(sp500Res.text());
+        }
         
-        console.log(`${stockList.length}개 종목 로드 완료`);
+        const textResults = await Promise.all(fetchPromises);
+        const [krxText, nasdaqText, sp500Text] = textResults;
+        
+        // KRX 데이터 파싱
+        const krxData = Papa.parse(krxText, { header: true, skipEmptyLines: true })
+            .data.map(s => ({ 
+                Symbol: s.Symbol, 
+                Name: s.Name,
+                Market: s.Market || 'KRX'
+            }));
+        
+        // NASDAQ 데이터 파싱
+        const nasdaqData = Papa.parse(nasdaqText, { header: true, skipEmptyLines: true })
+            .data.map(s => ({ 
+                Symbol: s.Symbol, 
+                Name: s['Company Name'] || s.Name,
+                Market: 'NASDAQ'
+            }));
+        
+        let allData = [...krxData, ...nasdaqData];
+        
+        // S&P 500 데이터 파싱 (있는 경우)
+        if (sp500Text) {
+            const sp500Data = Papa.parse(sp500Text, { header: true, skipEmptyLines: true })
+                .data.map(s => ({ 
+                    Symbol: s.Symbol, 
+                    Name: s['Company Name'] || s.Name,
+                    Market: 'S&P 500',
+                    Sector: s.Sector
+                }));
+            allData = [...allData, ...sp500Data];
+        }
+        
+        // 중복 제거 및 필터링
+        const uniqueStocks = new Map();
+        allData.forEach(stock => {
+            if (stock.Symbol && stock.Name) {
+                // 같은 심볼이 있으면 S&P 500 > NASDAQ > KRX 순으로 우선순위
+                const existing = uniqueStocks.get(stock.Symbol);
+                if (!existing || 
+                    (stock.Market === 'S&P 500') || 
+                    (stock.Market === 'NASDAQ' && existing.Market === 'KRX')) {
+                    uniqueStocks.set(stock.Symbol, stock);
+                }
+            }
+        });
+        
+        stockList = Array.from(uniqueStocks.values());
+        
+        console.log(`${stockList.length}개 종목 로드 완료 (KRX: ${krxData.length}, NASDAQ: ${nasdaqData.length}${sp500Text ? `, S&P 500: ${Papa.parse(sp500Text, { header: true, skipEmptyLines: true }).data.length}` : ''})`);
     } catch (e) { 
         console.error("주식 목록 로드 실패:", e);
         // 주식 목록 로드 실패시에도 앱은 계속 작동
@@ -1223,7 +1278,15 @@ tickerInput.addEventListener('input', () => {
         filteredStocks.forEach(stock => {
             const item = document.createElement('div');
             item.classList.add('autocomplete-item');
-            item.innerHTML = `<span class="stock-name">${stock.Name}</span><span class="stock-symbol">${stock.Symbol}</span>`;
+            const marketBadge = stock.Market ? `<span class="badge bg-secondary me-1">${stock.Market}</span>` : '';
+            item.innerHTML = `
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <span class="stock-name">${stock.Name}</span>
+                        <div class="small text-muted">${marketBadge}${stock.Symbol}</div>
+                    </div>
+                </div>
+            `;
             item.addEventListener('click', () => { tickerInput.value = stock.Symbol; autocompleteResults.style.display = 'none'; handleAnalysis(); });
             autocompleteResults.appendChild(item);
         });

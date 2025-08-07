@@ -6,3 +6,5 @@ requests
 yfinance
 numpy
 pandas
+lxml
+html5lib

@@ -3,7 +3,6 @@ A,Agilent Technologies Inc. Common Stock
 AA,Alcoa Corporation Common Stock 
 AACB,Artius II Acquisition Inc. Class A Ordinary Shares
 AACBR,Artius II Acquisition Inc. Rights
-AACBU,Artius II Acquisition Inc. Units
 AACG,ATA Creativity Global American Depositary Shares
 AACI,Armada Acquisition Corp. II Class A Ordinary Shares
 AACIU,Armada Acquisition Corp. II Units
@@ -33,11 +32,11 @@ ABL,Abacus Global Management Inc. Class A Common Stock
 ABLLL,Abacus Global Management Inc. 9.875% Fixed Rate Senior Notes due 2028
 ABLLW,Abacus Global Management Inc. Warrant
 ABLV,Able View Global Inc. Class B Ordinary Shares
+ABLVW,Able View Global Inc. Warrant
 ABM,ABM Industries Incorporated Common Stock
 ABNB,Airbnb Inc. Class A Common Stock
 ABOS,Acumen Pharmaceuticals Inc. Common Stock
 ABP,Abpro Holdings Inc Common Stock
-ABPWW,Abpro Holdings Inc. Warrant
 ABR,Arbor Realty Trust Common Stock
 ABR^D,Arbor Realty Trust 6.375% Series D Cumulative Redeemable Preferred Stock Liquidation Preference $25.00 per Share
 ABR^E,Arbor Realty Trust 6.25% Series E Cumulative Redeemable Preferred Stock
@@ -145,7 +144,6 @@ AEON,AEON Biopharma Inc. Class A Common Stock
 AEP,American Electric Power Company Inc. Common Stock
 AER,AerCap Holdings N.V. Ordinary Shares
 AERT,Aeries Technology Inc. Class A Ordinary Share
-AERTW,Aeries Technology Inc. Warrant
 AES,The AES Corporation Common Stock
 AESI,Atlas Energy Solutions Inc. Common Stock
 AEVA,Aeva Technologies Inc. Common Stock
@@ -159,7 +157,6 @@ AFGB,American Financial Group Inc. 5.875% Subordinated Debentures due 2059
 AFGC,American Financial Group Inc. 5.125% Subordinated Debentures due 2059
 AFGD,American Financial Group Inc. 5.625% Subordinated Debentures due 2060
 AFGE,American Financial Group Inc. 4.500% Subordinated Debentures due 2060
-AFJK,Aimei Health Technology Co. Ltd Ordinary Share
 AFJKR,Aimei Health Technology Co. Ltd Right
 AFL,AFLAC Incorporated Common Stock
 AFRI,Forafric Global PLC Ordinary Shares
@@ -209,8 +206,6 @@ AHT^G,Ashford Hospitality Trust Inc 7.375% Series G Cumulative Preferred Stock
 AHT^H,Ashford Hospitality Trust Inc 7.50% Series H Cumulative Preferred Stock
 AHT^I,Ashford Hospitality Trust Inc 7.50% Series I Cumulative Preferred Stock
 AI,C3.ai Inc. Class A Common Stock
-AIFE,Aifeex Nexus Acquisition Corporation Class A Ordinary Shares
-AIFER,Aifeex Nexus Acquisition Corporation Right
 AIFF,Firefly Neuroscience Inc. Common Stock
 AIFU,AIFU Inc. Class A Ordinary Share
 AIG,American International Group Inc. New Common Stock
@@ -259,9 +254,7 @@ ALB^A,Albemarle Corporation Depositary Shares each representing a 1/20th of 7.25
 ALC,Alcon Inc. Ordinary Shares
 ALCO,Alico Inc. Common Stock
 ALCY,Alchemy Investments Acquisition Corp 1 Class A Ordinary Shares
-ALCYW,Alchemy Investments Acquisition Corp 1 Warrants
 ALDF,Aldel Financial II Inc. Class A Ordinary Shares
-ALDFU,Aldel Financial II Inc. Units
 ALDFW,Aldel Financial II Inc. Warrants
 ALDX,Aldeyra Therapeutics Inc. Common Stock
 ALE,Allete Inc.
@@ -518,6 +511,7 @@ ASNS,Actelis Networks Inc. Common Stock
 ASO,Academy Sports and Outdoors Inc. Common Stock
 ASPC,A SPAC III Acquisition Corp. Class A Ordinary Shares
 ASPCR,A SPAC III Acquisition Corp. Right
+ASPCU,A SPAC III Acquisition Corp. Unit
 ASPI,ASP Isotopes Inc. Common Stock
 ASPN,Aspen Aerogels Inc. Common Stock
 ASPS,Altisource Portfolio Solutions S.A. Common Stock
@@ -557,6 +551,7 @@ ATH^D,Athene Holding Ltd. Depositary Shares Each Representing a 1/1000th Interes
 ATH^E,Athene Holding Ltd. Depositary Shares Each Representing a 1/1000th Interest in a 7.750% Fixed-Rate Reset Perpetual Non-Cumulative Preference Share Series E
 ATI,ATI Inc. Common Stock
 ATII,Archimedes Tech SPAC Partners II Co. Ordinary Shares
+ATIIU,Archimedes Tech SPAC Partners II Co. Unit
 ATIIW,Archimedes Tech SPAC Partners II Co. Warrant
 ATKR,Atkore Inc. Common Stock
 ATLC,Atlanticus Holdings Corporation Common Stock
@@ -612,6 +607,7 @@ AVAL,Grupo Aval Acciones y Valores S.A. ADR (Each representing 20 preferred shar
 AVAV,AeroVironment Inc. Common Stock
 AVB,AvalonBay Communities Inc. Common Stock
 AVBC,Avidia Bancorp Inc. Common Stock
+AVBH,Avidbank Holdings Inc. Common stock
 AVBP,ArriVent BioPharma Inc. Common Stock
 AVD,American Vanguard Corporation Common Stock ($0.10 Par Value)
 AVDL,Avadel Pharmaceuticals plc Ordinary Share
@@ -641,7 +637,6 @@ AX,Axos Financial Inc. Common Stock
 AXGN,Axogen Inc. Common Stock
 AXIL,AXIL Brands Inc. Common Stock
 AXIN,Axiom Intelligence Acquisition Corp 1 Class A Ordinary Shares
-AXINR,Axiom Intelligence Acquisition Corp 1 Right
 AXINU,Axiom Intelligence Acquisition Corp 1 Units
 AXL,American Axle & Manufacturing Holdings Inc. Common Stock
 AXON,Axon Enterprise Inc. Common Stock
@@ -667,10 +662,8 @@ BA,Boeing Company (The) Common Stock
 BABA,Alibaba Group Holding Limited American Depositary Shares each representing eight Ordinary share
 BAC,Bank of America Corporation Common Stock
 BACC,Blue Acquisition Corp. Class A Ordinary Shares
-BACCR,Blue Acquisition Corp. Right 
 BACCU,Blue Acquisition Corp. Unit
 BACQ,Bleichroeder Acquisition Corp. I Class A Ordinary Shares
-BACQR,Bleichroeder Acquisition Corp. I Right
 BAC^B,Bank of America Corporation Depositary Shares each representing a 1/1000th interest in a share of 6.000% Non-Cumulative Preferred Stock Series GG
 BAC^E,Bank of America Corporation Depositary Sh repstg 1/1000th Perp Pfd Ser E
 BAC^K,Bank of America Corporation Depositary Shares each representing a 1/1000th interest in a share of 5.875% Non- Cumulative Preferred Stock Series HH
@@ -717,7 +710,6 @@ BBDO,Banco Bradesco Sa American Depositary Shares (each representing one Common 
 BBGI,Beasley Broadcast Group Inc. Class A Common Stock
 BBIO,BridgeBio Pharma Inc. Common Stock
 BBLG,Bone Biologics Corp Common Stock
-BBLGW,Bone Biologics Corp Warrants
 BBN,BlackRock Taxable Municipal Bond Trust Common Shares of Beneficial Interest
 BBNX,Beta Bionics Inc. Common Stock
 BBSI,Barrett Business Services Inc. Common Stock
@@ -738,7 +730,6 @@ BCC,Boise Cascade L.L.C. Common Stock
 BCDA,BioCardia Inc. Common Stock
 BCE,BCE Inc. Common Stock
 BCG,Binah Capital Group Inc. Common Stock
-BCGWW,Binah Capital Group Inc. Warrants
 BCH,Banco De Chile ADS
 BCML,BayCom Corp Common Stock
 BCO,Brinks Company (The) Common Stock
@@ -767,7 +758,6 @@ BDTX,Black Diamond Therapeutics Inc. Common Stock
 BDX,Becton Dickinson and Company Common Stock
 BE,Bloom Energy Corporation Class A Common Stock
 BEAG,Bold Eagle Acquisition Corp. Class A Ordinary Shares
-BEAGU,Bold Eagle Acquisition Corp. Units
 BEAM,Beam Therapeutics Inc. Common Stock
 BEAT,Heartbeam Inc. Common Stock
 BEATW,Heartbeam Inc. Warrant
@@ -787,7 +777,6 @@ BEPI,Brookfield BRP Holdings (Canada) Inc. 4.875% Perpetual Subordinated Notes
 BEPJ,Brookfield BRP Holdings (Canada) Inc. 7.250% Perpetual Subordinated Notes
 BEP^A,Brookfield Renewable Partners L.P. 5.25% Class A Preferred Limited Partnership Units Series 17
 BETR,Better Home & Finance Holding Company Class A Common Stock
-BETRW,Better Home & Finance Holding Company Warrant
 BF/A,Brown Forman Corporation
 BF/B,Brown Forman Corporation
 BFAM,Bright Horizons Family Solutions Inc. Common Stock
@@ -799,7 +788,6 @@ BFLY,Butterfly Network Inc. Class A Common Stock
 BFRG,Bullfrog AI Holdings Inc. Common Stock
 BFRGW,Bullfrog AI Holdings Inc. Warrants
 BFRI,Biofrontera Inc. Common Stock
-BFRIW,Biofrontera Inc. Warrants
 BFS,Saul Centers Inc. Common Stock
 BFST,Business First Bancshares Inc. Common Stock
 BFS^D,Saul Centers Inc. Depositary Shares each representing 1/100th of a share of 6.125% Series D Cumulative Redeemable Preferred Stock
@@ -866,6 +854,7 @@ BIRK,Birkenstock Holding plc Ordinary Shares
 BIT,BlackRock Multi-Sector Income Trust Common Shares of Beneficial Interest
 BITF,Bitfarms Ltd. Common Stock
 BIVI,BioVie Inc. Class A Common Stock
+BIVIW,BioVie Inc. Warrant
 BIYA,Baiya International Group Inc. Ordinary Shares
 BJ,BJ's Wholesale Club Holdings Inc. Common Stock
 BJDX,Bluejay Diagnostics Inc. Common Stock
@@ -938,7 +927,6 @@ BMRN,BioMarin Pharmaceutical Inc. Common Stock
 BMY,Bristol-Myers Squibb Company Common Stock
 BN,Brookfield Corporation Class A Limited Voting Shares
 BNAI,Brand Engagement Network Inc. Common Stock
-BNAIW,Brand Engagement Network Inc. Warrant
 BNC,CEA Industries Inc. Common Stock
 BNCWW,CEA Industries Inc. Warrant
 BNED,Barnes & Noble Education Inc Common Stock
@@ -999,3 +987,15 @@ BRK/A,Berkshire Hathaway Inc.
 BRK/B,Berkshire Hathaway Inc.
 BRKL,Brookline Bancorp Inc. Common Stock
 BRKR,Bruker Corporation Common Stock
+BRLS,Borealis Foods Inc. Class A Common Shares
+BRLT,Brilliant Earth Group Inc. Class A Common Stock
+BRN,Barnwell Industries Inc. Common Stock
+BRNS,Barinthus Biotherapeutics plc American Depositary Shares
+BRO,Brown & Brown Inc. Common Stock
+BROS,Dutch Bros Inc. Class A Common Stock
+BRR,Columbus Circle Capital Corp I Class A Ordinary Shares
+BRRWU,Columbus Circle Capital Corp I Units
+BRRWW,Columbus Circle Capital Corp I Warrant
+BRSL,Brightstar Lottery PLC Trading under the Legal Name to begin at the market open on July 21 2025. Ordinary Shares
+BRSP,BrightSpire Capital Inc. Class A Common Stock
+BRT,BRT Apartments Corp. (MD) Common Stock

@@ -19,7 +19,7 @@ let stockList = [];
 let currentChartData = {};
 
 const chartState = {
-    isCandlestick: false,
+    isOHLC: false,
     indicators: { vwap: true, bb: true, rsi: true, macd: true }
 };
 
@@ -738,17 +738,92 @@ function updateChart() {
 
     const datasets = [];
     const dates = currentChartData.timestamp.map(ts => new Date(ts * 1000));
-    if (chartState.isCandlestick) {
+    if (chartState.isOHLC) {
+        // OHLC 시각화 - 고가/저가/시가/종가를 모두 표시
+        const ohlcPoints = dates.map((date, i) => {
+            const open = currentChartData.ohlc.open[i];
+            const high = currentChartData.ohlc.high[i];
+            const low = currentChartData.ohlc.low[i];
+            const close = currentChartData.ohlc.close[i];
+            
+            if (open != null && high != null && low != null && close != null) {
+                return {
+                    x: date.getTime(),
+                    y: close,
+                    open: open,
+                    high: high,
+                    low: low,
+                    isUp: close >= open
+                };
+            }
+            return null;
+        }).filter(item => item !== null);
+        
+        // 고가 선
         datasets.push({
-            label: '주가', type: 'candlestick', yAxisID: 'y',
-            data: dates.map((date, i) => ({
-                x: date.valueOf(),
-                o: currentChartData.ohlc.open[i], h: currentChartData.ohlc.high[i],
-                l: currentChartData.ohlc.low[i], c: currentChartData.ohlc.close[i]
-            }))
+            label: '고가',
+            type: 'line',
+            yAxisID: 'y',
+            data: ohlcPoints.map(item => ({ x: item.x, y: item.high })),
+            borderColor: '#26a69a',
+            backgroundColor: 'rgba(38, 166, 154, 0.1)',
+            borderWidth: 1,
+            pointRadius: 2,
+            fill: false
         });
+        
+        // 저가 선
+        datasets.push({
+            label: '저가',
+            type: 'line',
+            yAxisID: 'y',
+            data: ohlcPoints.map(item => ({ x: item.x, y: item.low })),
+            borderColor: '#ef5350',
+            backgroundColor: 'rgba(239, 83, 80, 0.1)',
+            borderWidth: 1,
+            pointRadius: 2,
+            fill: false
+        });
+        
+        // 시가 점
+        datasets.push({
+            label: '시가',
+            type: 'scatter',
+            yAxisID: 'y',
+            data: ohlcPoints.map(item => ({ x: item.x, y: item.open })),
+            borderColor: '#ffc107',
+            backgroundColor: '#ffc107',
+            pointRadius: 3,
+            showLine: false
+        });
+        
+        // 종가 선 (메인)
+        datasets.push({
+            label: '종가',
+            type: 'line',
+            yAxisID: 'y',
+            data: ohlcPoints.map(item => ({ x: item.x, y: item.close })),
+            borderColor: '#0d6efd',
+            backgroundColor: 'rgba(13, 110, 253, 0.1)',
+            borderWidth: 3,
+            pointRadius: 0,
+            fill: false
+        });
+        
     } else {
-        datasets.push({ label: '주가', type: 'line', yAxisID: 'y', data: currentChartData.ohlc.close, borderColor: '#0d6efd', pointRadius: 0, borderWidth: 2, spanGaps: true });
+        datasets.push({ 
+            label: '주가', 
+            type: 'line', 
+            yAxisID: 'y', 
+            data: dates.map((date, i) => ({
+                x: date.getTime(),
+                y: currentChartData.ohlc.close[i]
+            })).filter(item => item.y != null),
+            borderColor: '#0d6efd', 
+            pointRadius: 0, 
+            borderWidth: 2, 
+            spanGaps: true 
+        });
     }
 
     if (chartState.indicators.vwap) datasets.push({ label: 'VWAP', type: 'line', yAxisID: 'y', data: currentChartData.vwap, borderColor: '#dc3545', borderWidth: 1.5, pointRadius: 0, borderDash: [5, 5], spanGaps: true });
@@ -921,21 +996,23 @@ function initMobileTouchHandlers() {
             
             if (Math.abs(deltaX) > swipeThreshold) {
                 if (deltaX > 0) {
-                    // 오른쪽 스와이프 - 캔들차트로 전환
-                    if (!chartState.isCandlestick) {
-                        const candlestickToggle = document.getElementById('candlestick-toggle');
-                        if (candlestickToggle) {
-                            candlestickToggle.checked = true;
-                            toggleCandlestick();
+                    // 오른쪽 스와이프 - OHLC차트로 전환
+                    if (!chartState.isOHLC) {
+                        const ohlcToggle = document.getElementById('chart-type-switch');
+                        if (ohlcToggle) {
+                            ohlcToggle.checked = true;
+                            chartState.isOHLC = true;
+                            updateChart();
                         }
                     }
                 } else {
                     // 왼쪽 스와이프 - 라인차트로 전환
-                    if (chartState.isCandlestick) {
-                        const candlestickToggle = document.getElementById('candlestick-toggle');
-                        if (candlestickToggle) {
-                            candlestickToggle.checked = false;
-                            toggleCandlestick();
+                    if (chartState.isOHLC) {
+                        const ohlcToggle = document.getElementById('chart-type-switch');
+                        if (ohlcToggle) {
+                            ohlcToggle.checked = false;
+                            chartState.isOHLC = false;
+                            updateChart();
                         }
                     }
                 }
@@ -1020,10 +1097,11 @@ function togglePeriod() {
 }
 
 function toggleChartType() {
-    const candlestickToggle = document.getElementById('candlestick-toggle');
-    if (candlestickToggle) {
-        candlestickToggle.checked = !candlestickToggle.checked;
-        toggleCandlestick();
+    const ohlcToggle = document.getElementById('chart-type-switch');
+    if (ohlcToggle) {
+        ohlcToggle.checked = !ohlcToggle.checked;
+        chartState.isOHLC = ohlcToggle.checked;
+        updateChart();
     }
 }
 
@@ -1256,7 +1334,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     
     document.getElementById('analyze').addEventListener('click', handleAnalysis);
-    chartTypeSwitch.addEventListener('change', () => { chartState.isCandlestick = chartTypeSwitch.checked; updateChart(); });
+    chartTypeSwitch.addEventListener('change', () => { chartState.isOHLC = chartTypeSwitch.checked; updateChart(); });
     darkModeSwitch.addEventListener('change', (e) => applyTheme(e.target.checked ? 'dark' : 'light'));
     
     // 간격 변경시 기간 옵션 동적 업데이트

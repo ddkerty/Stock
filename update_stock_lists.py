@@ -1,344 +1,347 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-주식 목록 업데이트 스크립트
-- KRX (한국거래소) 주식 목록 크롤링
-- NASDAQ 주식 목록 크롤링
-- CSV 파일로 저장
+Stock lists updater (KRX / NASDAQ / S&P500)
+- Robust to weekends/holidays
+- Retries with backoff
+- Safer endpoints and headers
+- Deterministic CSV schemas
+Author: ChatGPT (for 현진님)
+Date: 2025-08-13 (Asia/Seoul)
 """
 
-import requests
-import pandas as pd
-import json
-import time
-from datetime import datetime
-import os
+from __future__ import annotations
+
+import argparse
+import io
 import logging
+import os
+import sys
+import time
+from datetime import date, datetime, timedelta
+from typing import Dict, Iterable, List, Optional, Tuple
 
-# 로깅 설정
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+import pandas as pd
+import requests
+from requests.adapters import HTTPAdapter, Retry
 
-class StockListUpdater:
-    def __init__(self):
-        self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        })
-    
-    def update_krx_stocks(self):
-        """한국거래소 주식 목록 업데이트"""
-        logger.info("KRX 주식 목록 업데이트 시작...")
-        
+
+# ----------------------------
+# Utilities
+# ----------------------------
+
+def ensure_out_dir(out_dir: str) -> str:
+    out_dir = os.path.abspath(out_dir)
+    os.makedirs(out_dir, exist_ok=True)
+    return out_dir
+
+
+def build_session() -> requests.Session:
+    s = requests.Session()
+    # General default headers
+    s.headers.update({
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0 Safari/537.36"
+        ),
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Connection": "keep-alive",
+    })
+    retries = Retry(
+        total=3,
+        backoff_factor=0.6,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=frozenset(["GET", "POST"]),
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(max_retries=retries, pool_connections=10, pool_maxsize=10)
+    s.mount("https://", adapter)
+    s.mount("http://", adapter)
+    return s
+
+
+def recent_business_days_krx(max_back: int = 10) -> Iterable[str]:
+    """Yield yyyymmdd strings for recent weekdays (Mon-Fri), up to max_back days back."""
+    d = date.today()
+    yielded = 0
+    while yielded <= max_back:
+        if d.weekday() < 5:  # 0=Mon..4=Fri
+            yield d.strftime("%Y%m%d")
+            yielded += 1
+        d -= timedelta(days=1)
+
+
+def save_csv(df: pd.DataFrame, path: str) -> None:
+    df.to_csv(path, index=False, encoding="utf-8-sig")
+
+
+def dedup_ordered(df: pd.DataFrame, key: str) -> pd.DataFrame:
+    return df.loc[~df[key].duplicated(keep="first")].reset_index(drop=True)
+
+
+# ----------------------------
+# KRX
+# ----------------------------
+
+def update_krx_stocks(session: requests.Session, out_path: str, limit: Optional[int] = None) -> bool:
+    """
+    Try multiple KRX endpoints and recent business days until we get a non-empty result.
+    Schema: Symbol,Name,Market
+    Markets: KOSPI, KOSDAQ
+    """
+    url = "https://data.krx.co.kr/comm/bldAttendant/getJsonData.cmd"
+    # Known blds that return listing info depending on KRX changes
+    blds = [
+        "dbms/MDC/STAT/standard/MDCSTAT01901",  # 종목검색(상장종목) - 기본
+        "dbms/MDC/STAT/standard/MDCSTAT01501",  # 대체 (변경 시도)
+    ]
+    mkt_map = {"KOSPI": "STK", "KOSDAQ": "KSQ"}
+    headers = {
+        "Referer": "https://data.krx.co.kr/contents/MDC/MDI/mdiLoader/index.cmd",
+        "X-Requested-With": "XMLHttpRequest",
+    }
+
+    rows_out: List[Dict[str, str]] = []
+
+    for bld in blds:
+        for trdDd in recent_business_days_krx(max_back=10):
+            logging.info(f"KRX try bld={bld}, trdDd={trdDd}")
+            collected_any_for_date = False
+            for market, mktId in mkt_map.items():
+                payload = {
+                    "bld": bld,
+                    "mktId": mktId,
+                    "trdDd": trdDd,
+                    "money": "1",
+                    "csvxls_isNo": "false",
+                }
+                try:
+                    r = session.post(url, data=payload, headers=headers, timeout=20)
+                    r.raise_for_status()
+                    data = r.json()
+                except Exception as e:
+                    logging.warning(f"KRX request failed ({market}, {trdDd}): {e}")
+                    continue
+
+                table = data.get("OutBlock_1") or data.get("output") or []
+                # Heuristic: Normalize field names
+                for rec in table:
+                    sym = rec.get("ISU_SRT_CD") or rec.get("ISU_CD") or rec.get("TRD_CD") or ""
+                    nm = rec.get("ISU_ABBRV") or rec.get("ISU_NM") or rec.get("KOR_SECNM") or ""
+                    sym = sym.strip()
+                    nm = nm.strip()
+                    if sym and nm:
+                        rows_out.append({"Symbol": sym, "Name": nm, "Market": market})
+                        collected_any_for_date = True
+
+            if collected_any_for_date:
+                # Stop at first date that yields data across any market
+                break
+        if rows_out:
+            break
+
+    if not rows_out:
+        logging.error("KRX API returned no data; using fallback shortlist.")
+        # Minimal, maintained fallback shortlist (ensure correctness of key blue chips)
+        fallback = [
+            {"Symbol": "005930", "Name": "삼성전자", "Market": "KOSPI"},
+            {"Symbol": "000660", "Name": "SK하이닉스", "Market": "KOSPI"},
+            {"Symbol": "005380", "Name": "현대차", "Market": "KOSPI"},
+            {"Symbol": "051910", "Name": "LG화학", "Market": "KOSPI"},
+            {"Symbol": "035720", "Name": "카카오", "Market": "KOSPI"},
+            {"Symbol": "068270", "Name": "셀트리온", "Market": "KOSPI"},
+            {"Symbol": "005490", "Name": "포스코홀딩스", "Market": "KOSPI"},  # corrected
+        ]
+        df = pd.DataFrame(fallback, columns=["Symbol", "Name", "Market"])
+        save_csv(df, out_path)
+        return False
+
+    df = pd.DataFrame(rows_out, columns=["Symbol", "Name", "Market"])
+    df = dedup_ordered(df, "Symbol").sort_values(["Market", "Symbol"]).reset_index(drop=True)
+    if limit:
+        df = df.head(limit)
+    save_csv(df, out_path)
+    return True
+
+
+# ----------------------------
+# NASDAQ
+# ----------------------------
+
+def _nasdaq_trader_primary(session: requests.Session) -> pd.DataFrame:
+    """
+    Primary: NASDAQ Trader official symbol directory (stable, pipe-delimited).
+    """
+    url = "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqtraded.txt"
+    r = session.get(url, timeout=30)
+    r.raise_for_status()
+    # Last line is "File Creation Time..."
+    df = pd.read_csv(io.StringIO(r.text), sep="|", dtype=str)
+    # Clean
+    df = df.fillna("")
+    df = df[(df["Test Issue"] == "N") & (df["ETF"] == "N")]
+    out = df[["Symbol", "Security Name"]].rename(columns={"Security Name": "Company Name"})
+    out["Symbol"] = out["Symbol"].str.strip()
+    out["Company Name"] = out["Company Name"].str.strip()
+    out = out[out["Symbol"].ne("")]
+    out = dedup_ordered(out, "Symbol").sort_values("Symbol").reset_index(drop=True)
+    return out
+
+
+def _nasdaq_api_fallback(session: requests.Session) -> pd.DataFrame:
+    """
+    Fallback: nasdaq.com screener API (less stable; often 403 without proper headers).
+    """
+    url = "https://api.nasdaq.com/api/screener/stocks"
+    headers = {
+        "Origin": "https://www.nasdaq.com",
+        "Referer": "https://www.nasdaq.com/market-activity/stocks/screener",
+    }
+    params = {"tableonly": "true", "limit": "0"}
+    r = session.get(url, headers=headers, params=params, timeout=30)
+    r.raise_for_status()
+    data = r.json()
+    rows = (data.get("data") or {}).get("rows") or []
+    records = []
+    for row in rows:
+        sym = (row.get("symbol") or "").strip()
+        name = (row.get("name") or "").strip()
+        if sym and name:
+            records.append({"Symbol": sym, "Company Name": name})
+    return pd.DataFrame.from_records(records, columns=["Symbol", "Company Name"])
+
+
+def update_nasdaq_stocks(session: requests.Session, out_path: str, limit: Optional[int] = None) -> bool:
+    """
+    Generate NASDAQ common stock list (ex-ETFs, ex-test issues).
+    Schema: Symbol,Company Name
+    """
+    try:
+        df = _nasdaq_trader_primary(session)
+        success = True
+        logging.info("NASDAQ: fetched via NASDAQ Trader.")
+    except Exception as e:
+        logging.warning(f"NASDAQ Trader primary failed: {e} ; trying nasdaq.com API fallback.")
         try:
-            # KRX 상장종목 API 호출
-            url = "http://data.krx.co.kr/comm/bldAttendant/getJsonData.cmd"
-            
-            # KOSPI 데이터
-            kospi_data = {
-                'bld': 'dbms/MDC/STAT/standard/MDCSTAT01501',
-                'mktId': 'STK',
-                'trdDd': datetime.now().strftime('%Y%m%d'),
-                'money': '1',
-                'csvxls_isNo': 'false'
-            }
-            
-            # KOSDAQ 데이터
-            kosdaq_data = {
-                'bld': 'dbms/MDC/STAT/standard/MDCSTAT01501',
-                'mktId': 'KSQ',
-                'trdDd': datetime.now().strftime('%Y%m%d'),
-                'money': '1',
-                'csvxls_isNo': 'false'
-            }
-            
-            stocks = []
-            
-            # KOSPI 주식 가져오기
-            logger.info("KOSPI 주식 목록 가져오는 중...")
-            response = self.session.post(url, data=kospi_data)
-            if response.status_code == 200:
-                response_data = response.json()
-                logger.info(f"KOSPI API 응답 구조: {list(response_data.keys())}")
-                
-                kospi_stocks = response_data.get('OutBlock_1', [])
-                if kospi_stocks and len(kospi_stocks) > 0:
-                    # 첫 번째 항목의 키를 확인
-                    logger.info(f"KOSPI 데이터 샘플 키: {list(kospi_stocks[0].keys())}")
-                
-                for stock in kospi_stocks:
-                    # 여러 가능한 키 시도
-                    symbol_key = stock.get('ISU_SRT_CD') or stock.get('ISU_CD') or stock.get('TRD_CD')
-                    name_key = stock.get('ISU_ABBRV') or stock.get('ISU_NM') or stock.get('KOR_SECNM')
-                    
-                    if symbol_key and name_key:
-                        stocks.append({
-                            'Symbol': symbol_key,
-                            'Name': name_key,
-                            'Market': 'KOSPI'
-                        })
-                logger.info(f"KOSPI 주식 {len([s for s in stocks if s['Market'] == 'KOSPI'])}개 수집 완료")
-            
-            time.sleep(1)  # API 호출 간격
-            
-            # KOSDAQ 주식 가져오기
-            logger.info("KOSDAQ 주식 목록 가져오는 중...")
-            response = self.session.post(url, data=kosdaq_data)
-            if response.status_code == 200:
-                response_data = response.json()
-                logger.info(f"KOSDAQ API 응답 구조: {list(response_data.keys())}")
-                
-                kosdaq_stocks = response_data.get('OutBlock_1', [])
-                if kosdaq_stocks and len(kosdaq_stocks) > 0:
-                    logger.info(f"KOSDAQ 데이터 샘플 키: {list(kosdaq_stocks[0].keys())}")
-                
-                for stock in kosdaq_stocks:
-                    # 여러 가능한 키 시도
-                    symbol_key = stock.get('ISU_SRT_CD') or stock.get('ISU_CD') or stock.get('TRD_CD')
-                    name_key = stock.get('ISU_ABBRV') or stock.get('ISU_NM') or stock.get('KOR_SECNM')
-                    
-                    if symbol_key and name_key:
-                        stocks.append({
-                            'Symbol': symbol_key,
-                            'Name': name_key,
-                            'Market': 'KOSDAQ'
-                        })
-                logger.info(f"KOSDAQ 주식 {len([s for s in stocks if s['Market'] == 'KOSDAQ'])}개 수집 완료")
-            
-            # DataFrame으로 변환 및 정리
-            df = pd.DataFrame(stocks)
-            df = df[df['Symbol'] != '']  # 빈 심볼 제거
-            df = df.drop_duplicates(subset=['Symbol'])  # 중복 제거
-            df = df.sort_values('Symbol')  # 정렬
-            
-            # CSV 저장
-            df.to_csv('krx_stock_list.csv', index=False, encoding='utf-8-sig')
-            logger.info(f"KRX 주식 목록 업데이트 완료: {len(df)}개 종목")
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"KRX 주식 목록 업데이트 실패: {e}")
-            import traceback
-            logger.error(f"상세 오류: {traceback.format_exc()}")
-            
-            # 백업: 수동으로 주요 한국 주식 추가
-            logger.info("백업 KRX 목록 생성 중...")
-            backup_stocks = [
-                {'Symbol': '005930', 'Name': '삼성전자', 'Market': 'KOSPI'},
-                {'Symbol': '000660', 'Name': 'SK하이닉스', 'Market': 'KOSPI'},
-                {'Symbol': '373220', 'Name': 'LG에너지솔루션', 'Market': 'KOSPI'},
-                {'Symbol': '207940', 'Name': '삼성바이오로직스', 'Market': 'KOSPI'},
-                {'Symbol': '005380', 'Name': '현대차', 'Market': 'KOSPI'},
-                {'Symbol': '051910', 'Name': 'LG화학', 'Market': 'KOSPI'},
-                {'Symbol': '035420', 'Name': 'NAVER', 'Market': 'KOSPI'},
-                {'Symbol': '068270', 'Name': '셀트리온', 'Market': 'KOSPI'},
-                {'Symbol': '035720', 'Name': '카카오', 'Market': 'KOSPI'},
-                {'Symbol': '105560', 'Name': 'KB금융', 'Market': 'KOSPI'},
-                {'Symbol': '055550', 'Name': '신한지주', 'Market': 'KOSPI'},
-                {'Symbol': '086790', 'Name': '하나금융지주', 'Market': 'KOSPI'},
-                {'Symbol': '032830', 'Name': '삼성생명', 'Market': 'KOSPI'},
-                {'Symbol': '015760', 'Name': '한국전력', 'Market': 'KOSPI'},
-                {'Symbol': '066570', 'Name': 'LG전자', 'Market': 'KOSPI'},
-                {'Symbol': '028260', 'Name': '삼성물산', 'Market': 'KOSPI'},
-                {'Symbol': '096770', 'Name': 'SK이노베이션', 'Market': 'KOSPI'},
-                {'Symbol': '003670', 'Name': '포스코홀딩스', 'Market': 'KOSPI'},
-                {'Symbol': '034730', 'Name': 'SK', 'Market': 'KOSPI'},
-                {'Symbol': '017670', 'Name': 'SK텔레콤', 'Market': 'KOSPI'},
-                {'Symbol': '030200', 'Name': 'KT', 'Market': 'KOSPI'},
-                {'Symbol': '251270', 'Name': '넷마블', 'Market': 'KOSPI'},
-                {'Symbol': '036570', 'Name': '엔씨소프트', 'Market': 'KOSPI'},
-                {'Symbol': '323410', 'Name': '카카오뱅크', 'Market': 'KOSPI'},
-                {'Symbol': '000270', 'Name': '기아', 'Market': 'KOSPI'}
+            df = _nasdaq_api_fallback(session)
+            success = True
+        except Exception as e2:
+            logging.error(f"NASDAQ API fallback failed: {e2}")
+            # Minimal fallback shortlist
+            fallback = [
+                {"Symbol": "AAPL", "Company Name": "Apple Inc."},
+                {"Symbol": "MSFT", "Company Name": "Microsoft Corporation"},
+                {"Symbol": "GOOGL", "Company Name": "Alphabet Inc. Class A"},
+                {"Symbol": "AMZN", "Company Name": "Amazon.com, Inc."},
+                {"Symbol": "NVDA", "Company Name": "NVIDIA Corporation"},
             ]
-            
-            try:
-                df = pd.DataFrame(backup_stocks)
-                df.to_csv('krx_stock_list.csv', index=False, encoding='utf-8-sig')
-                logger.info(f"백업 KRX 목록 생성 완료: {len(df)}개 종목")
-                return True
-            except Exception as backup_e:
-                logger.error(f"백업 KRX 목록 생성도 실패: {backup_e}")
-                return False
-    
-    def update_nasdaq_stocks(self):
-        """NASDAQ 주식 목록 업데이트"""
-        logger.info("NASDAQ 주식 목록 업데이트 시작...")
-        
-        try:
-            # NASDAQ API 사용 (공개 API)
-            url = "https://api.nasdaq.com/api/screener/stocks"
-            params = {
-                'tableonly': 'true',
-                'limit': '5000',
-                'offset': '0',
-                'download': 'true'
-            }
-            
-            headers = {
-                'Accept': 'application/json, text/plain, */*',
-                'Accept-Language': 'en-US,en;q=0.9',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-            
-            response = self.session.get(url, params=params, headers=headers)
-            
-            if response.status_code == 200:
-                data = response.json()
-                stocks_data = data.get('data', {}).get('rows', [])
-                
-                stocks = []
-                for stock in stocks_data:
-                    symbol = stock.get('symbol', '')
-                    name = stock.get('name', '')
-                    
-                    # 기본적인 필터링 (ETF, 우선주 등 제외)
-                    if (symbol and name and 
-                        not symbol.endswith('.WS') and  # 워런트 제외
-                        not symbol.endswith('.RT') and  # 권리 제외
-                        not symbol.endswith('.UN') and  # 유닛 제외
-                        len(symbol) <= 5):  # 너무 긴 심볼 제외
-                        
-                        stocks.append({
-                            'Symbol': symbol,
-                            'Company Name': name
-                        })
-                
-                # DataFrame으로 변환 및 정리
-                df = pd.DataFrame(stocks)
-                df = df.drop_duplicates(subset=['Symbol'])  # 중복 제거
-                df = df.sort_values('Symbol')  # 정렬
-                
-                # 상위 1000개만 선택 (너무 많으면 성능 저하)
-                df = df.head(1000)
-                
-                # CSV 저장
-                df.to_csv('nasdaq_stock_list.csv', index=False, encoding='utf-8-sig')
-                logger.info(f"NASDAQ 주식 목록 업데이트 완료: {len(df)}개 종목")
-                
-                return True
-            else:
-                logger.error(f"NASDAQ API 호출 실패: {response.status_code}")
-                return False
-                
-        except Exception as e:
-            logger.error(f"NASDAQ 주식 목록 업데이트 실패: {e}")
-            return False
-    
-    def update_sp500_stocks(self):
-        """S&P 500 주식 목록 업데이트 (Wikipedia 기반)"""
-        logger.info("S&P 500 주식 목록 업데이트 시작...")
-        
-        try:
-            # Wikipedia S&P 500 페이지 크롤링
-            url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-            
-            # pandas로 HTML 테이블 직접 읽기
-            tables = pd.read_html(url)
-            sp500_df = tables[0]  # 첫 번째 테이블이 S&P 500 목록
-            
-            # 필요한 컬럼만 추출하고 정리
-            stocks = []
-            for _, row in sp500_df.iterrows():
-                symbol = str(row['Symbol']).strip()
-                company_name = str(row['Security']).strip()
-                sector = str(row['GICS Sector']).strip()
-                
-                if symbol and symbol != 'nan' and company_name and company_name != 'nan':
-                    # 특수문자 정리 (점이나 하이픈이 있는 경우 처리)
-                    clean_symbol = symbol.replace('.', '-')  # Berkshire Hathaway B 등
-                    
-                    stocks.append({
-                        'Symbol': clean_symbol,
-                        'Company Name': company_name,
-                        'Sector': sector,
-                        'Market': 'S&P 500'
-                    })
-            
-            # DataFrame으로 변환
-            df = pd.DataFrame(stocks)
-            df = df.drop_duplicates(subset=['Symbol'])  # 중복 제거
-            df = df.sort_values('Symbol')  # 정렬
-            
-            # CSV 저장
-            df.to_csv('sp500_stock_list.csv', index=False, encoding='utf-8-sig')
-            logger.info(f"S&P 500 주식 목록 업데이트 완료: {len(df)}개 종목")
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"S&P 500 주식 목록 업데이트 실패: {e}")
-            
-            # 백업: 수동으로 주요 S&P 500 종목 추가
-            try:
-                logger.info("백업 S&P 500 목록 생성 중...")
-                backup_stocks = [
-                    {'Symbol': 'AAPL', 'Company Name': 'Apple Inc.', 'Sector': 'Information Technology', 'Market': 'S&P 500'},
-                    {'Symbol': 'MSFT', 'Company Name': 'Microsoft Corporation', 'Sector': 'Information Technology', 'Market': 'S&P 500'},
-                    {'Symbol': 'AMZN', 'Company Name': 'Amazon.com Inc.', 'Sector': 'Consumer Discretionary', 'Market': 'S&P 500'},
-                    {'Symbol': 'NVDA', 'Company Name': 'NVIDIA Corporation', 'Sector': 'Information Technology', 'Market': 'S&P 500'},
-                    {'Symbol': 'GOOGL', 'Company Name': 'Alphabet Inc. Class A', 'Sector': 'Communication Services', 'Market': 'S&P 500'},
-                    {'Symbol': 'GOOG', 'Company Name': 'Alphabet Inc. Class C', 'Sector': 'Communication Services', 'Market': 'S&P 500'},
-                    {'Symbol': 'TSLA', 'Company Name': 'Tesla Inc.', 'Sector': 'Consumer Discretionary', 'Market': 'S&P 500'},
-                    {'Symbol': 'META', 'Company Name': 'Meta Platforms Inc.', 'Sector': 'Communication Services', 'Market': 'S&P 500'},
-                    {'Symbol': 'BRK-B', 'Company Name': 'Berkshire Hathaway Inc. Class B', 'Sector': 'Financial Services', 'Market': 'S&P 500'},
-                    {'Symbol': 'UNH', 'Company Name': 'UnitedHealth Group Incorporated', 'Sector': 'Health Care', 'Market': 'S&P 500'},
-                    {'Symbol': 'JNJ', 'Company Name': 'Johnson & Johnson', 'Sector': 'Health Care', 'Market': 'S&P 500'},
-                    {'Symbol': 'XOM', 'Company Name': 'Exxon Mobil Corporation', 'Sector': 'Energy', 'Market': 'S&P 500'},
-                    {'Symbol': 'JPM', 'Company Name': 'JPMorgan Chase & Co.', 'Sector': 'Financial Services', 'Market': 'S&P 500'},
-                    {'Symbol': 'V', 'Company Name': 'Visa Inc.', 'Sector': 'Information Technology', 'Market': 'S&P 500'},
-                    {'Symbol': 'PG', 'Company Name': 'Procter & Gamble Company', 'Sector': 'Consumer Staples', 'Market': 'S&P 500'},
-                    {'Symbol': 'MA', 'Company Name': 'Mastercard Incorporated', 'Sector': 'Information Technology', 'Market': 'S&P 500'},
-                    {'Symbol': 'HD', 'Company Name': 'Home Depot Inc.', 'Sector': 'Consumer Discretionary', 'Market': 'S&P 500'},
-                    {'Symbol': 'CVX', 'Company Name': 'Chevron Corporation', 'Sector': 'Energy', 'Market': 'S&P 500'},
-                    {'Symbol': 'ABBV', 'Company Name': 'AbbVie Inc.', 'Sector': 'Health Care', 'Market': 'S&P 500'},
-                    {'Symbol': 'LLY', 'Company Name': 'Eli Lilly and Company', 'Sector': 'Health Care', 'Market': 'S&P 500'}
-                ]
-                
-                df = pd.DataFrame(backup_stocks)
-                df.to_csv('sp500_stock_list.csv', index=False, encoding='utf-8-sig')
-                logger.info(f"백업 S&P 500 목록 생성 완료: {len(df)}개 종목")
-                return True
-                
-            except Exception as backup_e:
-                logger.error(f"백업 S&P 500 목록 생성도 실패: {backup_e}")
-                return False
-    
-    def update_all(self):
-        """모든 주식 목록 업데이트"""
-        logger.info("=== 주식 목록 업데이트 시작 ===")
-        
-        krx_success = self.update_krx_stocks()
-        time.sleep(2)  # API 호출 간격
-        nasdaq_success = self.update_nasdaq_stocks()
-        time.sleep(2)  # API 호출 간격
-        sp500_success = self.update_sp500_stocks()
-        
-        # 업데이트 시간 기록
-        with open('last_update.txt', 'w', encoding='utf-8') as f:
-            f.write(f"마지막 업데이트: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"KRX 업데이트: {'성공' if krx_success else '실패'}\n")
-            f.write(f"NASDAQ 업데이트: {'성공' if nasdaq_success else '실패'}\n")
-            f.write(f"S&P 500 업데이트: {'성공' if sp500_success else '실패'}\n")
-        
-        if krx_success and nasdaq_success and sp500_success:
-            logger.info("=== 모든 주식 목록 업데이트 완료 ===")
-        else:
-            logger.warning("=== 일부 주식 목록 업데이트 실패 ===")
-        
-        return krx_success and nasdaq_success and sp500_success
+            df = pd.DataFrame(fallback, columns=["Symbol", "Company Name"])
+            success = False
 
-def main():
-    """메인 실행 함수"""
-    updater = StockListUpdater()
-    success = updater.update_all()
-    
-    if success:
-        print("✅ 주식 목록 업데이트가 성공적으로 완료되었습니다!")
-    else:
-        print("❌ 주식 목록 업데이트 중 오류가 발생했습니다.")
-    
+    df = dedup_ordered(df, "Symbol").sort_values("Symbol").reset_index(drop=True)
+    if limit:
+        df = df.head(limit)
+    save_csv(df, out_path)
     return success
 
+
+# ----------------------------
+# S&P 500
+# ----------------------------
+
+def update_sp500(session: requests.Session, out_path: str) -> bool:
+    """
+    Pull S&P 500 from Wikipedia.
+    Output schema:
+      - Symbol_original (as on Wikipedia)
+      - Symbol_yfinance ('.' -> '-' for yfinance compatibility)
+      - Company Name
+      - Sector
+    """
+    url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+    try:
+        # pandas will use requests under the hood; we ensure the page is fetchable via our session
+        r = session.get(url, timeout=30)
+        r.raise_for_status()
+        # Use read_html on the downloaded HTML to avoid different SSL/proxy contexts
+        tables = pd.read_html(io.StringIO(r.text))
+        sp500 = tables[0]
+        # Normalize columns
+        # Old pages: columns could be ['Symbol','Security','Sector',...]
+        # Recent pages include 'GICS Sector' naming.
+        cols = {c.lower(): c for c in sp500.columns}
+        sym_col = cols.get("symbol", "Symbol")
+        name_col = cols.get("security", "Security")
+        sector_col = cols.get("gics sector", "GICS Sector") if "gics sector" in cols else cols.get("sector", "Sector")
+
+        sp500["Symbol_original"] = sp500[sym_col].astype(str).str.strip()
+        sp500["Symbol_yfinance"] = sp500["Symbol_original"].str.replace(".", "-", regex=False)
+        sp500["Company Name"] = sp500[name_col].astype(str).str.strip()
+        sp500["Sector"] = sp500[sector_col].astype(str).str.strip()
+
+        out = sp500[["Symbol_original", "Symbol_yfinance", "Company Name", "Sector"]]
+        out = dedup_ordered(out, "Symbol_original").reset_index(drop=True)
+        save_csv(out, out_path)
+        return True
+    except Exception as e:
+        logging.error(f"S&P 500 fetch failed: {e}; using tiny fallback list.")
+        fallback = pd.DataFrame(
+            [
+                {"Symbol_original": "AAPL", "Symbol_yfinance": "AAPL", "Company Name": "Apple Inc.", "Sector": "Information Technology"},
+                {"Symbol_original": "MSFT", "Symbol_yfinance": "MSFT", "Company Name": "Microsoft Corporation", "Sector": "Information Technology"},
+                {"Symbol_original": "NVDA", "Symbol_yfinance": "NVDA", "Company Name": "NVIDIA Corporation", "Sector": "Information Technology"},
+            ],
+            columns=["Symbol_original", "Symbol_yfinance", "Company Name", "Sector"],
+        )
+        save_csv(fallback, out_path)
+        return False
+
+
+# ----------------------------
+# Main
+# ----------------------------
+
+def main(argv: Optional[List[str]] = None) -> int:
+    parser = argparse.ArgumentParser(description="Update stock lists for KRX / NASDAQ / S&P500")
+    parser.add_argument("--out-dir", type=str, default=".", help="Output directory for CSV files")
+    parser.add_argument("--limit-krx", type=int, default=None, help="Limit number of KRX rows (debug)")
+    parser.add_argument("--limit-nasdaq", type=int, default=None, help="Limit number of NASDAQ rows (debug)")
+    parser.add_argument("--log-level", type=str, default="INFO", help="Logging level (DEBUG, INFO, WARNING, ERROR)")
+    args = parser.parse_args(argv)
+
+    logging.basicConfig(
+        level=getattr(logging, args.log_level.upper(), logging.INFO),
+        format="%(asctime)s [%(levelname)s] %(message)s",
+    )
+
+    out_dir = ensure_out_dir(args.out_dir)
+    session = build_session()
+
+    # KRX
+    krx_out = os.path.join(out_dir, "krx_stock_list.csv")
+    logging.info("Updating KRX list...")
+    ok_krx = update_krx_stocks(session, krx_out, limit=args.limit_krx)
+    logging.info(f"KRX list {'OK' if ok_krx else 'FALLBACK'} -> {krx_out}")
+
+    # NASDAQ
+    nasdaq_out = os.path.join(out_dir, "nasdaq_stock_list.csv")
+    logging.info("Updating NASDAQ list...")
+    ok_nasdaq = update_nasdaq_stocks(session, nasdaq_out, limit=args.limit_nasdaq)
+    logging.info(f"NASDAQ list {'OK' if ok_nasdaq else 'FALLBACK'} -> {nasdaq_out}")
+
+    # S&P 500
+    sp500_out = os.path.join(out_dir, "sp500_stock_list.csv")
+    logging.info("Updating S&P 500 list...")
+    ok_sp500 = update_sp500(session, sp500_out)
+    logging.info(f"S&P 500 list {'OK' if ok_sp500 else 'FALLBACK'} -> {sp500_out}")
+
+    # Summary
+    success_count = sum([ok_krx, ok_nasdaq, ok_sp500])
+    logging.info(f"Done. Success: {success_count}/3")
+    return 0 if success_count >= 2 else 1
+
+
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
